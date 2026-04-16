@@ -14,6 +14,7 @@ This directory contains user documentation related to the GreenThumb project.
 ## Authors
 
 HARE Lab
+
 nubby
 
 

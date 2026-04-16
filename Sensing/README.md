@@ -23,6 +23,7 @@ This directory contains all software related to interfacing with sensors on both
 ## Authors
 
 HARE Lab
+
 nubby
 
 
