@@ -1,0 +1,3 @@
+[submodule "Sensing/teros12/ENTS-node-firmware"]
+	path = Sensing/teros12/ENTS-node-firmware
+	url = git@github.com:jlab-sensing/ENTS-node-firmware.git

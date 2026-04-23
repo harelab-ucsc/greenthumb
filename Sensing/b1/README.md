@@ -11,6 +11,11 @@ This subdirectory contains code to be run onboard the Unitree B1 robot.
 Copy over all scripts using `scp`.
 
 
+## Todo
+
+- Attempt to stream GNSS data from B1 using ROS.
+
+
 ## Authors
 
 HARE Lab
