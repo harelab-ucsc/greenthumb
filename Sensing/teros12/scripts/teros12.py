@@ -9,6 +9,7 @@ Authors:
     jLab
     HARE Lab
     nubby
+    dvdthr
 
 Date:
     26 Apr 2026
@@ -48,7 +49,7 @@ class Teros12(object):
        
         # Metadata.
         self.baudrate = baudrate
-        self.id = sensor_name
+        self.sensor_name = sensor_name
         self.port = port
         self.depth = depth
         self.depth_units = depth_units
@@ -104,7 +105,7 @@ class Teros12(object):
             depth_label,
             "teros12",
             ts,
-            self.id
+            self.sensor_name
         ]) + ".csv" 
         os.makedirs(self.output_folder, exist_ok=True) # make sure output directory exists
         self.log_path = os.path.join(self.output_folder, filename) # save log path
@@ -131,14 +132,14 @@ class Teros12(object):
             if vwc is None:
                 continue
                 
-            timestamp = datetime.now.isoformat(timespec="seconds")
+            timestamp = datetime.now().isoformat(timespec="seconds")
             self._write_csv_row(timestamp=timestamp, vwc=vwc, raw_line=line)
             
     def _parse_vwc(self, line: str) -> float | None:
         """
         Description: parse volumetric water content value from serial output
         """
-        key = "vwcPercentMineralizedSoils"
+        key = "vwcPercentMineralizedSoils:"
         if key not in line: 
             return None
         value_text = line.split(key, 1)[1].strip()
@@ -160,15 +161,12 @@ class Teros12(object):
 
         with open(self.log_path, "a", encoding="utf-8") as log_file: 
             if file_empty:
-                log_file.write("timestamp,sensor_name,depth,depth_units,usb_serial,port"
-                "vwc_percent_mineralized_soils,raw_line\n"
-                ) # write description if file is empty
+                # write description if file is empty
+                log_file.write(f"BOARD SERIAL NUMBER: {self.usb_serial}\nUSB SERIAL PORT: {self.port}\n")
+                log_file.write("timestamp,sensor_name,depth,depth_units,VWC,raw_line\n") 
             safe_raw_line = raw_line.replace('"','""')
-            log_file.write(
-                f'{timestamp},{self.id},{self.depth}{self.depth_units},'
-                f'{self.usb_serial},{self.port},{vwc},"{safe_raw_line}"\n'
-            )
-            
+            log_file.write(f'{timestamp},{self.sensor_name},{self.depth},{self.depth_units},{vwc},"{safe_raw_line}"\n')
+
     def connect(self) -> bool:
         """
         Description:
@@ -179,7 +177,10 @@ class Teros12(object):
         """
         # Open the serial port if not already active.
         if not self.connected:
-            self._conn.open()
+            try:
+                self._conn.open()
+            except serial.SerialException:
+                return False
             self.connected = self._conn.is_open
         return self.connected
 
@@ -192,8 +193,14 @@ class Teros12(object):
             (bool)  Disconnected?
         """
         # Close the serial port if open.
+        if self.streaming:
+            self.stop_stream()
+
         if self.connected:
-            self._conn.close()
+            try:
+                self._conn.close()
+            except serial.SerialException:
+                return False
             self.connected = self._conn.is_open
         return not self.connected
 
@@ -206,7 +213,21 @@ class Teros12(object):
             (bool)  Streaming?
         """
         # Configure stream logging path.
+        if self.streaming:
+            return True
+        if not self.connected:
+            if not self.connect():
+                return False
         self._set_logging_path()
+        self.start_timestamp = datetime.now().isoformat(timespec="seconds")
+        self.stop_timestamp = None
+
+        self._streaming_stop_event.clear()
+        self.streaming = True
+
+        self._streaming_thread = threading.Thread(target=self._reader, daemon=True)
+        self._streaming_thread.start()
+
         return self.streaming
 
     def stop_stream(self) -> bool:
@@ -217,7 +238,37 @@ class Teros12(object):
         Returns:
             (bool)  Not streaming?
         """
+
+        if not self.streaming:
+            return True
+        
+        self._streaming_stop_event.set()
+        
+        if self._streaming_thread is not None:
+            self._streaming_thread.join(timeout=3)
+        
+        self.streaming = False
+        self.stop_timestamp = datetime.now().isoformat(timespec="seconds")
+
         return not self.streaming
 
     def get_metadata(self) -> dict:
-        return {}
+        """
+        Description: 
+            Get and return all metadata
+        """
+        res = {}
+        res["sensor_name"] = self.sensor_name
+        res["port"] = self.port
+        res["depth"] = self.depth
+        res["depth_units"] = self.depth_units
+        res["usb_serial"] = self.usb_serial
+        res["output_folder"] = self.output_folder
+        res["start_timestamp"] = self.start_timestamp
+        res["stop_timestamp"] = self.stop_timestamp
+        res["connected"] = self.connected
+        res["streaming"] = self.streaming
+        res["baudrate"] = self.baudrate
+        res["log_path"] = self.log_path
+
+        return res
