@@ -20,19 +20,43 @@ from datetime import datetime
 import serial
 import threading
 import time
+import os
 
 
 class Teros12(object):
     """
-    Container for drivers for TEROS-12 sensors.
+        Descrciption: 
+            Container for one teros12 sensor
+        arguments:
+            port: seial port path
+            baudrate: default ENTs board baudrate
+            sensor_name: sensor label
+            depth: self explanatory
+            depth_units: default to centimeters
+            usb_serial: unique serial number attached to each board
+            output_folder: where to write output data to
     """
-    def __init__(self, port: str, baudrate: int = 115200):
-        """
-        """
+    def __init__(
+        self,
+        port: str,
+        baudrate: int = 115200,
+        sensor_name: str = "sensor_0",
+        depth: float | None = None, 
+        depth_units = "cm",
+        usb_serial: str | None = None,
+        output_folder: str = "output"):
+       
         # Metadata.
         self.baudrate = baudrate
-        self.id = "0"
+        self.id = sensor_name
         self.port = port
+        self.depth = depth
+        self.depth_units = depth_units
+        self.usb_serial = usb_serial
+        self.output_folder = output_folder
+        self.start_timestamp = None
+        self.stop_timestamp = None
+
 
         # State variables.
         self.connected = False
@@ -41,11 +65,11 @@ class Teros12(object):
         # Configure serial channel and streaming.
         self._buffer = []
         self._set_up_serial_connection(baudrate=baudrate, port=port)
-        self._set_logging_path()
+        self.log_path = None
         self._streaming_thread = None
         self._streaming_stop_event = threading.Event()
 
-    def _set_up_serial_connection(baudrate: int, port: str):
+    def _set_up_serial_connection(self, baudrate: int, port: str):
         """
         Description:
             Configure serial connection.
@@ -58,6 +82,7 @@ class Teros12(object):
         self._conn = serial.Serial()
         self._conn.baudrate = baudrate
         self._conn.port = port
+        self._conn.timeout = 1
 
     def _set_logging_path(self):
         """
@@ -69,22 +94,81 @@ class Teros12(object):
         ts_dt = datetime.now()
         ts = ts_dt.strftime("%Y%m%d_%H%M%S")
 
-        # Assemble stream path.
-        self.log_path = "-".join([
-            ts,
+        # Assemble csv filename
+
+        depth_label = "unknown_depth"
+        if self.depth is not None: 
+            depth_label = f"{self.depth}{self.depth_units}"
+
+        filename = "-".join([ 
+            depth_label,
             "teros12",
+            ts,
             self.id
-        ])
+        ]) + ".csv" 
+        os.makedirs(self.output_folder, exist_ok=True) # make sure output directory exists
+        self.log_path = os.path.join(self.output_folder, filename) # save log path
 
     def _reader(self):
         """
         TODO(nubby, 26 Apr 2026): Make more robust and add writer.
         """
-        while not self._streaming_stop_event.is_set():
-            line = self._conn.readline()
-            if line:
-                self._buffer.append(line)
+        while not self._streaming_stop_event.is_set(): 
+            raw_line = self._conn.readline()
 
+            if not raw_line: #if no incoming data, wait
+                continue
+
+            line = raw_line.decode("utf-8", errors="replace").strip() 
+
+            if not line: 
+                continue
+
+            self._buffer.append(line)
+
+            vwc = self._parse_vwc(line)
+
+            if vwc is None:
+                continue
+                
+            timestamp = datetime.now.isoformat(timespec="seconds")
+            self._write_csv_row(timestamp=timestamp, vwc=vwc, raw_line=line)
+            
+    def _parse_vwc(self, line: str) -> float | None:
+        """
+        Description: parse volumetric water content value from serial output
+        """
+        key = "vwcPercentMineralizedSoils"
+        if key not in line: 
+            return None
+        value_text = line.split(key, 1)[1].strip()
+        value_text = value_text.split(";", 1)[0].strip()
+
+        try: 
+            return float(value_text)
+        except ValueError: 
+            return None
+        
+    def _write_csv_row(self, timestamp: str, vwc: float, raw_line: str):
+        """
+        Description: write the parsed VWC to the csv log file
+        """
+        if self.log_path is None:
+            self._set_logging_path()
+        file_exists = os.path.exists(self.log_path)
+        file_empty = not file_exists or os.path.getsize(self.log_path) == 0
+
+        with open(self.log_path, "a", encoding="utf-8") as log_file: 
+            if file_empty:
+                log_file.write("timestamp,sensor_name,depth,depth_units,usb_serial,port"
+                "vwc_percent_mineralized_soils,raw_line\n"
+                ) # write description if file is empty
+            safe_raw_line = raw_line.replace('"','""')
+            log_file.write(
+                f'{timestamp},{self.id},{self.depth}{self.depth_units},'
+                f'{self.usb_serial},{self.port},{vwc},"{safe_raw_line}"\n'
+            )
+            
     def connect(self) -> bool:
         """
         Description:
@@ -125,7 +209,7 @@ class Teros12(object):
         self._set_logging_path()
         return self.streaming
 
-    def stop_stream(self) -> bool -> bool -> bool -> bool:
+    def stop_stream(self) -> bool:
         """
         Description:
             Terminate streaming if connected and possible.
