@@ -13,9 +13,9 @@ Update sensor_config in teros12_stream.py to match your specific ENTs board seri
 In your terminal run `python3 teros12_stream` to begin the similtaneous streaming and file logging
 
 CLI Flags: 
-    --duration <int> -> run stream for <int> seconds
-    --baudrate <int> -> set custom baudrate, default 115200
-    --output-folder <folder_path/folder_name> -> where to save csv files
+    --duration <int> -> run stream for <int> seconds, default to infinite loop
+    --baudrate <int> -> set custom baudrate, default to 115200
+    --output-folder <folder_path/folder_name> -> where to save csv files default to output
 
 ## Authors
 
