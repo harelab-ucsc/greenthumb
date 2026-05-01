@@ -43,7 +43,7 @@ class Teros12(object):
         baudrate: int = 115200,
         sensor_name: str = "sensor_0",
         depth: float | None = None, 
-        depth_units = "cm",
+        depth_units = "inch",
         usb_serial: str | None = None,
         output_folder: str = "output"):
        
@@ -135,7 +135,7 @@ class Teros12(object):
             timestamp = datetime.now().isoformat(timespec="seconds")
             self._write_csv_row(timestamp=timestamp, vwc=vwc, raw_line=line)
             
-    def _parse_vwc(self, line: str) -> float | None:
+    def _parse_vwc(self, line: str) -> float | None: 
         """
         Description: parse volumetric water content value from serial output
         """
@@ -152,7 +152,7 @@ class Teros12(object):
         
     def _write_csv_row(self, timestamp: str, vwc: float, raw_line: str):
         """
-        Description: write the parsed VWC to the csv log file
+        Description: write the timestamp, sensor name, sensor depth, parsed vwc, and raw line to the csv log file
         """
         if self.log_path is None:
             self._set_logging_path()
