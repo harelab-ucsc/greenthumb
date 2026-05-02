@@ -1,0 +1,4 @@
+BOARD SERIAL NUMBER: 9e12fd528fb2ed119ea44eaca7669f5d
+USB SERIAL PORT: /dev/cu.usbserial-130
+timestamp,sensor_name,depth,depth_units,VWC,raw_line
+2026-05-01T15:47:27,sensor_3,12,inch,0.141515,"Status code: 0; addr = 0; vwcRaw: 2158.070068; temp: 29.299999; ec: 50; vwcPercentMineralizedSoils: 0.141515"

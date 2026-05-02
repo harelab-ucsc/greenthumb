@@ -1,0 +1,13 @@
+BOARD SERIAL NUMBER: 9e12fd528fb2ed119ea44eaca7669f5d
+USB SERIAL PORT: /dev/cu.usbserial-130
+timestamp,sensor_name,depth,depth_units,VWC,raw_line
+2026-05-01T15:43:40,sensor_3,9,inch,0.121275,"Status code: 0; addr = 0; vwcRaw: 2105.889893; temp: 28.600000; ec: 68; vwcPercentMineralizedSoils: 0.121275"
+2026-05-01T15:43:48,sensor_3,9,inch,0.121155,"Status code: 0; addr = 0; vwcRaw: 2105.580078; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.121155"
+2026-05-01T15:43:55,sensor_3,9,inch,0.120689,"Status code: 0; addr = 0; vwcRaw: 2104.379883; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.120689"
+2026-05-01T15:44:03,sensor_3,9,inch,0.12103,"Status code: 0; addr = 0; vwcRaw: 2105.260010; temp: 28.600000; ec: 68; vwcPercentMineralizedSoils: 0.121030"
+2026-05-01T15:44:10,sensor_3,9,inch,0.120736,"Status code: 0; addr = 0; vwcRaw: 2104.500000; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.120736"
+2026-05-01T15:44:18,sensor_3,9,inch,0.120813,"Status code: 0; addr = 0; vwcRaw: 2104.699951; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.120813"
+2026-05-01T15:44:26,sensor_3,9,inch,0.121201,"Status code: 0; addr = 0; vwcRaw: 2105.699951; temp: 28.600000; ec: 68; vwcPercentMineralizedSoils: 0.121201"
+2026-05-01T15:44:33,sensor_3,9,inch,0.121457,"Status code: 0; addr = 0; vwcRaw: 2106.360107; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.121457"
+2026-05-01T15:44:41,sensor_3,9,inch,0.120611,"Status code: 0; addr = 0; vwcRaw: 2104.179932; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.120611"
+2026-05-01T15:44:48,sensor_3,9,inch,0.121705,"Status code: 0; addr = 0; vwcRaw: 2107.000000; temp: 28.600000; ec: 69; vwcPercentMineralizedSoils: 0.121705"
