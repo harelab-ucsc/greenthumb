@@ -27,20 +27,20 @@ from teros12 import Teros12
 sensor_config = [
     {
         "sensor_name" : "sensor_1",
-        "depth" : 3,
+        "depth" : 6,
         "depth_units" : "inch",
         "usb_serial": "aa192e3c9eb2ed11840d4daca7669f5d"
     }
     , 
     {
         "sensor_name" : "sensor_2",
-        "depth" : 6,
+        "depth" : 9,
         "depth_units" : "inch",
         "usb_serial": "14d0f0dda5b2ed118ecd4faca7669f5d"
     },
     {
         "sensor_name" : "sensor_3",
-        "depth" : 9,
+        "depth" : 12,
         "depth_units" : "inch",
         "usb_serial": "9e12fd528fb2ed119ea44eaca7669f5d"
     }
