@@ -1,2 +1,5 @@
 # System files.
 *.DS_Store
+
+# Virtual environments.
+*.venv*/
