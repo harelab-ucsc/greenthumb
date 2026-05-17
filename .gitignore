@@ -1,2 +1,12 @@
 # System files.
 *.DS_Store
+
+# Python environments and precompiled files.
+*.venv*
+*.pyc
+*__pycache__
+
+# Data files.
+Sensing/teros12/scripts/output/
+Sensing/b1/data/
+Sensing/radar/data/
