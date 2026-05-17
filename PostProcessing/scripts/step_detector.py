@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import sys
 
+from io import StringIO
+
 
 def print_df_stats(df: pd.DataFrame):
     """
@@ -145,19 +147,22 @@ def _read_csv(path: str) -> pd.DataFrame:
         df      (pd.DataFrame)
     """
     # Import the raw CSV file as an array.
-    data_array = []
     with open(path, "r") as fp:
+        data_array = [
+            line for i, line in enumerate(fp) if i == 0 or "," in line
+        ]
+        """
         for line in fp:
             # Filter out invalid rows.
             csv_row = line.split(",")
-            if len(csv_row) > 1:
+            if len(csv_row) == 65:
                 data_array.append(csv_row)
+            else:
+                print(csv_row)
+        """
 
     # Convert CSV array into pandas DataFrame.
-    df = pd.DataFrame(data_array[1:], columns=data_array[0])
-
-    print_df_stats(df)
-    sys.exit()
+    df = pd.read_csv(StringIO("".join(data_array)))
 
     return df
 
