@@ -6,7 +6,7 @@ Date:
     17 May 2026
 
 Version:
-    0.0.1
+    0.0.3
 """
 import csv
 import math
@@ -41,6 +41,7 @@ def print_df_stats(df: pd.DataFrame):
 def plot_data_columns(
         df: pd.DataFrame,
         n: int,
+        cols: list[str] = [],
         start_index: int = 0
     ):
     """
@@ -51,11 +52,17 @@ def plot_data_columns(
     Args:
         df          (pd.DataFrame)
         n           (int)           Number of datapoints to plot.
+        cols        (list[str])     Names of columns desired to plot; if empty,
+                                    plot all.
         start_index (int)           Starting data entry index.
     """
     # Take the slice based on the starting index.
     # TODO: Check that there are enough frames.
     df_chunk = df.iloc[start_index:start_index + n]
+
+    # Select only desired columns if provided.
+    if len(cols) > 0:
+        df_chunk = df_chunk.loc[:, cols]
 
     # Only keep numeric columns.
     df_chunk = df_chunk.select_dtypes(include="number")
@@ -69,7 +76,7 @@ def plot_data_columns(
             layout=(num_rows, num_cols),
             figsize=(5*num_cols, 3*num_rows),
             sharex=True,
-            legend=False
+            legend=True
         )
 
     plt.tight_layout()
@@ -92,17 +99,9 @@ def scrub_df(df: pd.DataFrame) -> pd.DataFrame:
     # Start with only numeric columns.
     numeric = df.select_dtypes(include=["number"])
 
-    # First remove constant columns (from Perplexity).
-    #df = df.loc[:, df.nunique(dropna=False) > 1].copy()
+    # First remove constant and 0.0 columns (from Perplexity).
+    df = df.loc[:, df.nunique(dropna=False) > 1].copy()
     df = df.loc[:, df.var(numeric_only=True) != 0]
-    # A couple of columns may remain, so do something special for them.
-    """
-    columns_to_drop = []
-    for column in df.columns:
-        c_var = df[column].var()
-        if c_var == 0.0:
-            columns_to_drop.append(column)
-    """
 
     # Next, delete datapoints which remain 0.0 for a while (i.e. at the
     # start of data collection).
@@ -130,8 +129,37 @@ def extract_steps_from_df(df: pd.DataFrame) -> list[pd.DataFrame]:
     # First, trim both empty data columns (in the case of early test data) and
     # long sequences of nothing (as in the beginning).
     df = scrub_df(df)
+
     print_df_stats(df)
-    plot_data_columns(df, 40)
+
+    cols = [
+#            "FRHipdQ (rps)",
+#            "FRThighdQ (rps)",
+#            "FRKneedQ (rps)",
+#            "FLHipdQ (rps)",
+#            "FLThighdQ (rps)",
+#            "FLKneedQ (rps)",
+#            "RLHipdQ (rps)",
+#            "RLThighdQ (rps)",
+#            "RLKneedQ (rps)",
+#            "RRHipdQ (rps)",
+#            "RRThighdQ (rps)",
+#            "RRKneedQ (rps)"
+            "FRHipT (Nm)",
+            "FRThighT (Nm)",
+            "FRKneeT (Nm)",
+            "FLHipT (Nm)",
+            "FLThighT (Nm)",
+            "FLKneeT (Nm)",
+            "RLHipT (Nm)",
+            "RLThighT (Nm)",
+            "RLKneeT (Nm)",
+            "RRHipT (Nm)",
+            "RRThighT (Nm)",
+            "RRKneeT (Nm)",
+            "IMUAccz"
+        ]
+    plot_data_columns(df=df, cols=cols, n=5000, start_index=100000)
 
 def _read_csv(path: str) -> pd.DataFrame:
     """
