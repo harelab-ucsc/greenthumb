@@ -65,32 +65,38 @@ void Custom::RobotControl()
 
     // Angle of each joint.
     for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].q << ",";
-        std::cout << state.motorState[i+1].q << ",";
-        std::cout << state.motorState[i+2].q << ",";
+        std::cout << state.motorState[i*3].q << ",";
+        std::cout << state.motorState[i*3+1].q << ",";
+        std::cout << state.motorState[i*3+2].q << ",";
     }
 
     // Velocity of each joint (angular).
     for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].dq << ",";
-        std::cout << state.motorState[i+1].dq << ",";
-        std::cout << state.motorState[i+2].dq << ",";
+        std::cout << state.motorState[i*3].dq << ",";
+        std::cout << state.motorState[i*3+1].dq << ",";
+        std::cout << state.motorState[i*3+2].dq << ",";
     }
 
     // Acceleration of each joint (angular).
     for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].ddq << ",";
-        std::cout << state.motorState[i+1].ddq << ",";
-        std::cout << state.motorState[i+2].ddq << ",";
+        std::cout << state.motorState[i*3].ddq << ",";
+        std::cout << state.motorState[i*3+1].ddq << ",";
+        std::cout << state.motorState[i*3+2].ddq << ",";
     }
 
     // Torque for each joint.
     for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].tauEst << ",";
-        std::cout << state.motorState[i+1].tauEst << ",";
-        std::cout << state.motorState[i+2].tauEst << ",";
+        std::cout << state.motorState[i*3].tauEst << ",";
+        std::cout << state.motorState[i*3+1].tauEst << ",";
+        std::cout << state.motorState[i*3+2].tauEst << ",";
     }
 
+    // Foot force for each paw.
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.footForce[i] << ",";
+    }
+
+    // IMU info.
     std::cout       << state.imu.accelerometer[0] << ",";
     std::cout 	    << state.imu.accelerometer[1] << ",";
     std::cout 	    << state.imu.accelerometer[2] << ",";
@@ -103,7 +109,6 @@ void Custom::RobotControl()
     std::cout 	    << state.imu.quaternion[3];
 
     std::cout << std::endl;
-
 }
 
 int main(void)
@@ -142,6 +147,8 @@ int main(void)
     // NOTE: The below is a string that can be used to fix previously mislabeled
     //          headers (fixes a bug).
     //FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),
+    // Foot forces.
+    std::cout << "FRFootF (N),FLFootF (N),RRFootF (N),RLFootF (N),";
 
     // IMU out.
     std::cout << "IMUAccx,IMUAccy,IMUAccz,IMUGyrroll,IMUGyrpitch,IMUGyryaw,IMUQw,IMUQx,IMUQy,IMUQz\n";
