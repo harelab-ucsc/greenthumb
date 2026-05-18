@@ -70,25 +70,11 @@ void Custom::RobotControl()
         std::cout << state.motorState[i+2].q << ",";
     }
 
-    // Raw angle of each joint.
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].q_raw << ",";
-        std::cout << state.motorState[i+1].q_raw << ",";
-        std::cout << state.motorState[i+2].q_raw << ",";
-    }
-
     // Velocity of each joint (angular).
     for (uint8_t i = 0; i < 4; i++) {
         std::cout << state.motorState[i].dq << ",";
         std::cout << state.motorState[i+1].dq << ",";
         std::cout << state.motorState[i+2].dq << ",";
-    }
-
-    // Raw velocity of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].dq_raw << ",";
-        std::cout << state.motorState[i+1].dq_raw << ",";
-        std::cout << state.motorState[i+2].dq_raw << ",";
     }
 
     // Acceleration of each joint (angular).
@@ -98,13 +84,6 @@ void Custom::RobotControl()
         std::cout << state.motorState[i+2].ddq << ",";
     }
 
-    // Raw acceleration of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].ddq_raw << ",";
-        std::cout << state.motorState[i+1].ddq_raw << ",";
-        std::cout << state.motorState[i+2].ddq_raw << ",";
-    }
-
     // Torque for each joint.
     for (uint8_t i = 0; i < 4; i++) {
         std::cout << state.motorState[i].tauEst << ",";
@@ -112,7 +91,7 @@ void Custom::RobotControl()
         std::cout << state.motorState[i+2].tauEst << ",";
     }
 
-    std::cout << state.imu.accelerometer[0] << ",";
+    std::cout       << state.imu.accelerometer[0] << ",";
     std::cout 	    << state.imu.accelerometer[1] << ",";
     std::cout 	    << state.imu.accelerometer[2] << ",";
     std::cout 	    << state.imu.gyroscope[0] << ",";
@@ -142,23 +121,11 @@ int main(void)
     std::cout << "RRHipQ (rad),RRThighQ (rad),RRKneeQ (rad),";
     std::cout << "RLHipQ (rad),RLThighQ (rad),RLKneeQ (rad),";
 
-    // Raw joint angles.
-    std::cout << "FRHipQ (raw rad),FRThighQ (raw rad),FRKneeQ (raw rad),";
-    std::cout << "FLHipQ (raw rad),FLThighQ (raw rad),FLKneeQ (raw rad),";
-    std::cout << "RRHipQ (raw rad),RRThighQ (raw rad),RRKneeQ (raw rad),";
-    std::cout << "RLHipQ (raw rad),RLThighQ (raw rad),RLKneeQ (raw rad),";
-
     // Joint velocities.
     std::cout << "FRHipdQ (rps),FRThighdQ (rps),FRKneedQ (rps),";
     std::cout << "FLHipdQ (rps),FLThighdQ (rps),FLKneedQ (rps),";
     std::cout << "RRHipdQ (rps),RRThighdQ (rps),RRKneedQ (rps),";
     std::cout << "RLHipdQ (rps),RLThighdQ (rps),RLKneedQ (rps),";
-
-    // Raw joint velocities.
-    std::cout << "FRHipdQ (raw rps),FRThighdQ (raw rps),FRKneedQ (raw rps),";
-    std::cout << "FLHipdQ (raw rps),FLThighdQ (raw rps),FLKneedQ (raw rps),";
-    std::cout << "RRHipdQ (raw rps),RRThighdQ (raw rps),RRKneedQ (raw rps),";
-    std::cout << "RLHipdQ (raw rps),RLThighdQ (raw rps),RLKneedQ (raw rps),";
 
     // Joint accelerations.
     std::cout << "FRHipd2Q (rps^2),FRThighd2Q (rps^2),FRKneed2Q (rps^2),";
@@ -166,16 +133,15 @@ int main(void)
     std::cout << "RRHipd2Q (rps^2),RRThighd2Q (rps^2),RRKneed2Q (rps^2),";
     std::cout << "RLHipd2Q (rps^2),RLThighd2Q (rps^2),RLKneed2Q (rps^2),";
 
-    // Raw joint accelerations.
-    std::cout << "FRHipd2Q (raw rps^2),FRThighd2Q (raw rps^2),FRKneed2Q (raw rps^2),";
-    std::cout << "FLHipd2Q (raw rps^2),FLThighd2Q (raw rps^2),FLKneed2Q (raw rps^2),";
-    std::cout << "RRHipd2Q (raw rps^2),RRThighd2Q (raw rps^2),RRKneed2Q (raw rps^2),";
-    std::cout << "RLHipd2Q (raw rps^2),RLThighd2Q (raw rps^2),RLKneed2Q (raw rps^2),";
-
     // Estimated joint torques.
-    std::cout << "FRHipT (Nm),FRHipT (Nm),FRHipT (Nm),FRHipT (Nm),";
-    std::cout << "FRThighT (Nm),FRThighT (Nm),FRThighT (Nm),FRThighT (Nm),";
-    std::cout << "FRKneeT (Nm),FRKneeT (Nm),FRKneeT (Nm),FRKneeT (Nm),";
+    std::cout << "FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),";
+    std::cout << "FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),";
+    std::cout << "RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),";
+    std::cout << "RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),";
+
+    // NOTE: The below is a string that can be used to fix previously mislabeled
+    //          headers (fixes a bug).
+    //FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),
 
     // IMU out.
     std::cout << "IMUAccx,IMUAccy,IMUAccz,IMUGyrroll,IMUGyrpitch,IMUGyryaw,IMUQw,IMUQx,IMUQy,IMUQz\n";
