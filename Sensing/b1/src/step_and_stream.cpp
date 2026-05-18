@@ -77,92 +77,39 @@ void Custom::RobotControl()
     cmd.velocity[1] = 0.0f;
     cmd.yawSpeed = 0.0f;
     cmd.reserve = 0;
+    // Print headers.
+    std::cout << "time (ms),surface,forwardSpeed (m/s),sideSpeed (m/s),rotateSpeed (m?/s),yawSpeed(rad/s),eval_id,";
 
-    if (motiontime > 0 && motiontime < 2000)
-    {
-        cmd.mode = 2;
-    }
-    else if (motiontime >= 2000 && motiontime < 4000)
-    {
-        cmd.mode = 2;
-	cmd.gaitType = 3;
-	cmd.yawSpeed = -0.05;
-    }
-    else if (motiontime >= 4000 && motiontime < 5000)
-    {
-        cmd.mode = 2;
-	//cmd.yawSpeed = 0;
-    }
-    else if (motiontime >= 5000 && motiontime < 7000)
-    {
-        cmd.mode = 2;
-	cmd.gaitType = 3;
-	cmd.yawSpeed = 0.05;
-    }
-    else // (motiontime >= 7000 && motiontime < 8000)
-    {
-        cmd.mode = 2;
-	//cmd.yawSpeed = 0;
-	motiontime = 2000;
-    }
+    // Joint angles.
+    std::cout << "FRHipQ (rad),FRThighQ (rad),FRKneeQ (rad),";
+    std::cout << "FLHipQ (rad),FLThighQ (rad),FLKneeQ (rad),";
+    std::cout << "RRHipQ (rad),RRThighQ (rad),RRKneeQ (rad),";
+    std::cout << "RLHipQ (rad),RLThighQ (rad),RLKneeQ (rad),";
 
-    // Output all data as a CSV to stdout.
-    std::cout << timestamp << "," << SURFACE << ",";
-    std::cout << state.velocity[0] << ",";
-    std::cout << state.velocity[1] << ",";
-    std::cout << state.velocity[2] << ",";
-    std::cout << state.yawSpeed << ",";
+    // Joint velocities.
+    std::cout << "FRHipdQ (rps),FRThighdQ (rps),FRKneedQ (rps),";
+    std::cout << "FLHipdQ (rps),FLThighdQ (rps),FLKneedQ (rps),";
+    std::cout << "RRHipdQ (rps),RRThighdQ (rps),RRKneedQ (rps),";
+    std::cout << "RLHipdQ (rps),RLThighdQ (rps),RLKneedQ (rps),";
 
-    std::cout << EVAL_ID << ",";
+    // Joint accelerations.
+    std::cout << "FRHipd2Q (rps^2),FRThighd2Q (rps^2),FRKneed2Q (rps^2),";
+    std::cout << "FLHipd2Q (rps^2),FLThighd2Q (rps^2),FLKneed2Q (rps^2),";
+    std::cout << "RRHipd2Q (rps^2),RRThighd2Q (rps^2),RRKneed2Q (rps^2),";
+    std::cout << "RLHipd2Q (rps^2),RLThighd2Q (rps^2),RLKneed2Q (rps^2),";
 
-    // Angle of each joint.
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].q << ",";
-        std::cout << state.motorState[i+1].q << ",";
-        std::cout << state.motorState[i+2].q << ",";
-    }
+    // Estimated joint torques.
+    std::cout << "FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),";
+    std::cout << "FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),";
+    std::cout << "RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),";
+    std::cout << "RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),";
 
-    // Raw angle of each joint.
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].q_raw << ",";
-        std::cout << state.motorState[i+1].q_raw << ",";
-        std::cout << state.motorState[i+2].q_raw << ",";
-    }
+    // NOTE: The below is a string that can be used to fix previously mislabeled
+    //          headers (fixes a bug).
+    //FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),
+    // Foot forces.
+    std::cout << "FRFootF (N),FLFootF (N),RRFootF (N),RLFootF (N),";
 
-    // Velocity of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].dq << ",";
-        std::cout << state.motorState[i+1].dq << ",";
-        std::cout << state.motorState[i+2].dq << ",";
-    }
-
-    // Raw velocity of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].dq_raw << ",";
-        std::cout << state.motorState[i+1].dq_raw << ",";
-        std::cout << state.motorState[i+2].dq_raw << ",";
-    }
-
-    // Acceleration of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].ddq << ",";
-        std::cout << state.motorState[i+1].ddq << ",";
-        std::cout << state.motorState[i+2].ddq << ",";
-    }
-
-    // Raw acceleration of each joint (angular).
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].ddq_raw << ",";
-        std::cout << state.motorState[i+1].ddq_raw << ",";
-        std::cout << state.motorState[i+2].ddq_raw << ",";
-    }
-
-    // Torque for each joint.
-    for (uint8_t i = 0; i < 4; i++) {
-        std::cout << state.motorState[i].tauEst << ",";
-        std::cout << state.motorState[i+1].tauEst << ",";
-        std::cout << state.motorState[i+2].tauEst << ",";
-    }
 
     std::cout << state.imu.accelerometer[0] << ",";
     std::cout 	    << state.imu.accelerometer[1] << ",";
