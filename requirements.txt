@@ -1,0 +1,7 @@
+# requirements.txt
+torch==1.13.0
+numpy<2
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.13
+wandb>=0.16
