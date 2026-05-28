@@ -1,4 +1,11 @@
 # requirements.txt
+
+## Sensing
+
+pyserial
+
+## PostProcessing
+
 torch==1.13.0
 numpy<2
 pandas>=2.0
