@@ -2,10 +2,12 @@
 preprocess_b1_data.py
 
 Author:
+    HARE Lab
+    jLab
     nubby
 
 Date:
-    11 Dec 2025
+    28 May 2026
 
 Version:
     1.0.0
@@ -108,18 +110,24 @@ def _label_proprioceptive_dataset(info: dict) -> pd.DataFrame:
 
 def _load_dataset(base_path: str, file_names: list[str]) -> dict:
     """Read all data from a given base path."""
+    # TODO(nubby): After lunch.
     # All metadata and datasets related to a given test session.
     dataset_info = {
         "label": base_path.split("-")[-1],
         "path": {
+            "core_csv": "",
             "pen_csv": "",
             "robot_csv": "" 
         },
         "dataset": {
             "combined": None,
             "imu": None,
-            "mtorques": None,
-            "penetrometer": None,
+            "jangles": None,
+            "jdangles": None,
+            "jddangles": None,
+            "jtorques": None,
+            "sbd": None,
+            "spr": None,
             "proprioceptive": None
         },
         "timestamp": ""
@@ -150,6 +158,7 @@ def _load_dataset(base_path: str, file_names: list[str]) -> dict:
 
 def _split_dataset(dataset: pd.DataFrame) -> dict:
     """Divide a combined dataset into labeld IMU and motor torque datasets."""
+    # TODO: Why is this unused?
     imu_keys = [
             "time (ms)",
             "IMUAccx",
@@ -162,9 +171,13 @@ def _split_dataset(dataset: pd.DataFrame) -> dict:
             "IMUQx",
             "IMUQy",
             "IMUQz",
+            "SPR 0in (PSI)",
             "SPR 3in (PSI)",
             "SPR 6in (PSI)",
-            "SPR 9in (PSI)"
+            "SPR 9in (PSI)",
+            "SPR 12in (PSI)",
+            "SPR 15in (PSI)",
+            "SPR 18in (PSI)"
         ]
     torque_keys = [
             "time (ms)",
@@ -180,9 +193,13 @@ def _split_dataset(dataset: pd.DataFrame) -> dict:
             "FLCalfT (Nm)",
             "RRCalfT (Nm)",
             "RLCalfT (Nm)",
+            "SPR 0in (PSI)",
             "SPR 3in (PSI)",
             "SPR 6in (PSI)",
-            "SPR 9in (PSI)"
+            "SPR 9in (PSI)",
+            "SPR 12in (PSI)",
+            "SPR 15in (PSI)",
+            "SPR 18in (PSI)"
         ]
     return info
 
@@ -205,11 +222,28 @@ def load_new_datasets(path_base: str) -> list[dict]:
 
     return verbose_datasets
 
-# TODO
-def plot_steps(csv_data: dict):
-    print(csv_data["timestamp"], csv_data["path"])
-
 def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
+    """
+    preprocess_b1_data(path_input_dir, path_output_dir)
+
+    Description:
+        Clean and organize data from controlled compaction studies into joint,
+        IMU, and label files.
+
+        We want to enforce naming conventions as follows:
+            + <DATE>_<TIME>-<LABEL>-b1_imu.csv
+            + <DATE>_<TIME>-<LABEL>-b1_joints.csv
+            + <DATE>_<TIME>-<LABEL>-labels.csv
+
+        In the above, "b1_imu" corresponds to IMU data (accelerations,
+        quaternions), "b1_joints" are joint-related readings, including
+        (torques, angles, d_angle, d^2_angle), and "labels" include (SPR, SBD)
+        ground-truth soil compaction measurements, averaged at each scene for
+        each layer.
+
+        Each "LABEL" above should follow "SETTING_COMPACTION" format, e.g.
+        "SETTING" = "Lab", "COMPACTION" = "0" (for loose soil).
+    """
     # Comb through each directory to find each applicable data file.
     print(f"Input Directory:\t./{path_input_dir}/\r\n"
           f"Output Directory:\t./{path_output_dir}/")
@@ -218,6 +252,7 @@ def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
         [len(info) > 0 for info in verbose_datasets]
     ), "ERROR: No input CSV files found!"
 
+    # Output properly formatted dataset as described above.
     [_write_dataset(
         dataset=info["dataset"]["combined"],
         path=os.path.join(
@@ -227,20 +262,6 @@ def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
             "combined.csv"
         )
      ) for info in verbose_datasets]
-
-    # We want to enforce naming conventions as follows:
-    #   + <DATE>_<TIME>-<LABEL>-b1_imu.csv
-    #   + <DATE>_<TIME>-<LABEL>-b1_joints.csv
-    #   + <DATE>_<TIME>-<LABEL>_soilPen-labels.csv
-    #
-    # In the above, "b1_imu" corresponds to IMU data (accelerations, quaternions),
-    # "b1_joints" are torques from each joint in Nm, and "soilPen-labels" are
-    # ground truth soil compaction measurements, averaged at each scene for each layer.
-    """
-    for dataset_info in verbose_datasets:
-        #_load_raw_data(info_data_input)
-        plot_steps(dataset_info)
-    """
     
 
 if __name__ == "__main__":
