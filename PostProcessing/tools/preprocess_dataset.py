@@ -1,5 +1,5 @@
 """
-preprocess_b1_data.py
+preprocess_dataset.py
 
 Author:
     HARE Lab
@@ -110,7 +110,6 @@ def _label_proprioceptive_dataset(info: dict) -> pd.DataFrame:
 
 def _load_dataset(base_path: str, file_names: list[str]) -> dict:
     """Read all data from a given base path."""
-    # TODO(nubby): After lunch.
     # All metadata and datasets related to a given test session.
     dataset_info = {
         "label": base_path.split("-")[-1],
@@ -121,13 +120,13 @@ def _load_dataset(base_path: str, file_names: list[str]) -> dict:
         },
         "dataset": {
             "combined": None,
+            "core": None,
             "imu": None,
-            "jangles": None,
-            "jdangles": None,
-            "jddangles": None,
-            "jtorques": None,
-            "sbd": None,
-            "spr": None,
+            "j_angles": None,
+            "j_dangles": None,
+            "j_d2angles": None,
+            "j_torques": None,
+            "penetrometer": None,
             "proprioceptive": None
         },
         "timestamp": ""
@@ -145,6 +144,8 @@ def _load_dataset(base_path: str, file_names: list[str]) -> dict:
             dataset_info["path"]["robot_csv"])
         dataset_info["dataset"]["penetrometer"] = _read_csv(
                 dataset_info["path"]["pen_csv"])
+        dataset_info["dataset"]["core"] = _read_csv(
+                dataset_info["path"]["core_csv"])
     except Exception as e:
         return dataset_info
 
@@ -171,13 +172,15 @@ def _split_dataset(dataset: pd.DataFrame) -> dict:
             "IMUQx",
             "IMUQy",
             "IMUQz",
-            "SPR 0in (PSI)",
-            "SPR 3in (PSI)",
-            "SPR 6in (PSI)",
-            "SPR 9in (PSI)",
-            "SPR 12in (PSI)",
-            "SPR 15in (PSI)",
-            "SPR 18in (PSI)"
+            "SBD 4in (g/cm^3)",
+            "SBD 7in (g/cm^3)",
+            "SBD 10in (g/cm^3)",
+            "SPR 4in (PSI)",
+            "SPR 7in (PSI)",
+            "SPR 10in (PSI)",
+            "VWC 4in (%)",
+            "VWC 7in (%)",
+            "VWC 10in (%)"
         ]
     torque_keys = [
             "time (ms)",
@@ -193,22 +196,133 @@ def _split_dataset(dataset: pd.DataFrame) -> dict:
             "FLCalfT (Nm)",
             "RRCalfT (Nm)",
             "RLCalfT (Nm)",
-            "SPR 0in (PSI)",
-            "SPR 3in (PSI)",
-            "SPR 6in (PSI)",
-            "SPR 9in (PSI)",
-            "SPR 12in (PSI)",
-            "SPR 15in (PSI)",
-            "SPR 18in (PSI)"
+            "FLHipQ (Nm)",
+            "RRHipQ (Nm)",
+            "RLHipQ (Nm)",
+            "FRThighQ (Nm)",
+            "FLThighQ (Nm)",
+            "RRThighQ (Nm)",
+            "RLThighQ (Nm)",
+            "FRCalfQ (Nm)",
+            "FLCalfQ (Nm)",
+            "RRCalfQ (Nm)",
+            "RLCalfQ (Nm)",
+            "FLHipdQ (Nm)",
+            "RRHipdQ (Nm)",
+            "RLHipdQ (Nm)",
+            "FRThighdQ (Nm)",
+            "FLThighdQ (Nm)",
+            "RRThighdQ (Nm)",
+            "RLThighdQ (Nm)",
+            "FRCalfdQ (Nm)",
+            "FLCalfdQ (Nm)",
+            "RRCalfdQ (Nm)",
+            "RLCalfdQ (Nm)",
+            "FLHipd2Q (Nm)",
+            "RRHipd2Q (Nm)",
+            "RLHipd2Q (Nm)",
+            "FRThighd2Q (Nm)",
+            "FLThighd2Q (Nm)",
+            "RRThighd2Q (Nm)",
+            "RLThighd2Q (Nm)",
+            "FRCalfd2Q (Nm)",
+            "FLCalfd2Q (Nm)",
+            "RRCalfd2Q (Nm)",
+            "RLCalfd2Q (Nm)",
+            "SBD 4in (g/cm^3)",
+            "SBD 7in (g/cm^3)",
+            "SBD 10in (g/cm^3)"
+            "SPR 4in (PSI)",
+            "SPR 7in (PSI)",
+            "SPR 10in (PSI)",
+            "VWC 4in (%)",
+            "VWC 7in (%)",
+            "VWC 10in (%)"
         ]
     return info
 
+def _estimate_depth_pen_labels(
+    df: pd.DataFrame,
+    depths: list[int],
+    interpolation: str = "linear"
+) -> pd.DataFrame:
+    """
+    _estimate_depth_pen_labels(df, depths) -> df
+
+    Args:
+        interpolation   (str)   [linear]
+            * linear == least squares fit for compaction value.
+    """
+
+def _load_pen_labels(path_base: str) -> pd.DataFrame:
+    """
+    _load_pen_labels(path_base) -> labels
+    """
+    # Load all values from the label file.
+    path_pen_labels = "/".join([
+        path_base,
+        "pen_labels.csv"
+    ])
+    labels_df = _read_csv(path_pen_labels)
+
+    # Calculate average SPR for each depth.
+    pen_cols = [
+            "Penetrometer PSI (sample 1)",
+            "Penetrometer PSI (sample 2)",
+            "Penetrometer PSI (sample 3)",
+            "Penetrometer PSI (sample 4)",
+            "Penetrometer PSI (sample 5)"
+    ]
+    labels_df["Average PSI"] = labels_df[pen_cols].mean(axis=1)
+
+    # Generate new labels (if not currently present) for [4, 7, 10]" range.
+    new_depths = [4, 7, 10]
+    labels_df = _estimate_depth_pen_labels(df=labels_df, depths=new_depths)
+
+    return labels_df
+
+def _load_core_labels(path_base: str) -> dict:
+    """
+    _load_core_labels(path_base) -> labels
+    """
+    path_core_labels = "/".join([
+        path_base,
+        "core_labels.csv"
+    ])
+    labels_df = _read_csv(path_core_labels)
+    print(labels_df)
+    exit()
+
+    # Calculate average SPR for each depth.
+    pen_cols = [
+            "Penetrometer PSI (sample 1)",
+            "Penetrometer PSI (sample 2)",
+            "Penetrometer PSI (sample 3)",
+            "Penetrometer PSI (sample 4)",
+            "Penetrometer PSI (sample 5)"
+    ]
+    labels_df["Average PSI"] = labels_df[pen_cols].mean(axis=1)
+    print(labels)
+    exit()
+    return labels
+
 def load_new_datasets(path_base: str) -> list[dict]:
     """
-    Import and group raw CSV datasets from data collection trials.
+    load_new_datasets(path_base) -> datasets
+
+    Import, label, and trim raw B1 CSV datasets from data collection trials.
     """
+    # First load all labels.
+    labels_pen = _load_pen_labels(path_base=path_base)
+    labels_core = _load_core_labels(path_base=path_base)
+
+    # Next load raw B1 datasets.
     verbose_datasets = []
-    assert os.path.isdir(path_base), "ERROR: Data input directory does not exist!"
+    assert (
+        os.path.isdir(path_base)
+    ), (
+        "ERROR: Data input directory does not exist!"
+    )
     for base, _, files in os.walk(path_base):
         info = _load_dataset(base_path=base, file_names=files)
         # Only append info if it corresponds to a directory containing all 
@@ -222,9 +336,25 @@ def load_new_datasets(path_base: str) -> list[dict]:
 
     return verbose_datasets
 
-def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
+def _check_previously_run_datasets(path_output_dir: str) -> list[str]:
     """
-    preprocess_b1_data(path_input_dir, path_output_dir)
+    _check_previously_run_datasets(path_output_dir) -> [to_skip]
+
+    Load dataset labels that have already been processed.
+    """
+    # TODO.
+    return []
+
+def preprocess_dataset(
+        path_input_dir: str,
+        path_output_dir: str,
+        force: bool = False
+    ):
+    """
+    preprocess_dataset(
+            path_input_dir,
+            path_output_dir
+        )
 
     Description:
         Clean and organize data from controlled compaction studies into joint,
@@ -244,12 +374,21 @@ def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
         Each "LABEL" above should follow "SETTING_COMPACTION" format, e.g.
         "SETTING" = "Lab", "COMPACTION" = "0" (for loose soil).
     """
-    # Comb through each directory to find each applicable data file.
     print(f"Input Directory:\t./{path_input_dir}/\r\n"
-          f"Output Directory:\t./{path_output_dir}/")
+          f"Output Directory:\t./{path_output_dir}/\r\n"
+    )
+
+    # Check which datasets have already been formatted to skip.
+    to_skip = []
+    if not force:
+        to_skip += _check_previously_run_datasets(path_output_dir)
+
+    # Comb through each directory to find each applicable data file.
     verbose_datasets = load_new_datasets(path_input_dir)
-    assert any(
-        [len(info) > 0 for info in verbose_datasets]
+    assert (
+        any(
+            [len(info) > 0 for info in verbose_datasets]
+        )
     ), "ERROR: No input CSV files found!"
 
     # Output properly formatted dataset as described above.
@@ -266,12 +405,19 @@ def preprocess_b1_data(path_input_dir: str, path_output_dir: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Convert raw data from dog into model for use by GreenThumb."
+        description="Convert raw sensor data into a form usable by GreenThumb."
     )
-    parser.add_argument("--input_dir", type=str, default="tmp")
-    parser.add_argument("--output_dir", type=str, default="data")
+    parser.add_argument("--input_dir", type=str, default="../Data")
+    parser.add_argument("--output_dir", type=str, default="processed")
+    parser.add_argument(
+        "--force",
+        type=bool,
+        default=False,
+        help="Force script to reprocess data?"
+    )
     args = parser.parse_args()
-    preprocess_b1_data(
+    preprocess_dataset(
         path_input_dir=args.input_dir,
-        path_output_dir=args.output_dir
+        path_output_dir=args.output_dir,
+        force=args.force
     )
