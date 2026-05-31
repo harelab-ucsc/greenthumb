@@ -1,0 +1,8 @@
+Test Case,Date,Depth,Compaction Level (index),Penetrometer PSI (sample 1),Penetrometer PSI (sample 2),Penetrometer PSI (sample 3),Penetrometer PSI (sample 4),Penetrometer PSI (sample 5),Average PSI
+example,1/1/1970,0 inch,2,0,0,0,0,50,
+example,1/1/1970,3 inches,2,50,90,80,90,80,
+example,1/1/1970,6 inches,2,30,90,15,60,10,
+example,1/1/1970,9 inches,2,10,30,,30,10,
+example,1/1/1970,12 inches,2,5,20,,20,5,
+example,1/1/1970,15 inches,2,5,20,,10,10,
+example,1/1/1970,18 inches,2,40,60,,30,10,
