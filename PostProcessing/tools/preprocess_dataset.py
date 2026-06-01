@@ -84,7 +84,7 @@ def _get_penetrometer_labels(dataset: pd.DataFrame, num_layers: int) -> dict:
     return soil_layer_stats
 
 # TODO(nubby): Add GPS/timestamp alignment here?
-def _label_proprioceptive_dataset(info: dict) -> pd.DataFrame:
+def label_dataset(info: dict) -> pd.DataFrame:
     """Add SPR labels to a proprioceptive dataset."""
     assert (
         not info["dataset"]["penetrometer"].empty and
@@ -108,15 +108,29 @@ def _label_proprioceptive_dataset(info: dict) -> pd.DataFrame:
 
     return info
 
-def _load_dataset(base_path: str, file_names: list[str]) -> dict:
-    """Read all data from a given base path."""
+def label_datasets(
+        core_labels: pd.DataFrame,
+        base_path: str,
+        pen_labels: pd.DataFrame
+    ) -> list[dict]:
+    """
+    label_datasets()
+    """
+    return []
+
+def _load_dataset(base_path: str, file_names: list[str]) -> list[dict]:
+    """
+    Read all data from a given base path and return a list of processed, labeled
+    datasets as pandas DataFrames with accompanying metadata.
+    """
     # All metadata and datasets related to a given test session.
     dataset_info = {
         "label": base_path.split("-")[-1],
         "path": {
-            "core_csv": "",
-            "pen_csv": "",
-            "robot_csv": "" 
+            "cores": "",
+            "pens": "",
+            "b1": [],
+            "teros12": []
         },
         "dataset": {
             "combined": None,
@@ -149,13 +163,17 @@ def _load_dataset(base_path: str, file_names: list[str]) -> dict:
     except Exception as e:
         return dataset_info
 
-    # Combine all robot and penetrometer datasets.
+    # Attach GT labels to datasets.
     try:
-        dataset_info = _label_proprioceptive_dataset(info=dataset_info)
+        processed_datasets = label_datasets(
+                core_labels=core_labels,
+                pen_labels=pen_labels,
+                data_in_dir=data_in_dir
+            )
     except AssertionError:
         pass
 
-    return dataset_info
+    return dataset_info 
 
 def _split_dataset(dataset: pd.DataFrame) -> dict:
     """Divide a combined dataset into labeld IMU and motor torque datasets."""
@@ -253,6 +271,40 @@ def _estimate_depth_pen_labels(
         interpolation   (str)   [linear]
             * linear == least squares fit for compaction value.
     """
+    new_entries = []
+
+    # Group each entry by date and compaction level first.
+    grouped = df.groupby([
+        "Date",
+        "Compaction Level (index)"
+    ])
+
+    for group in grouped:
+            x = group[1]["Depth (inches)"].to_numpy(dtype=float)
+            y = group[1]["Average PSI"].to_numpy(dtype=float)
+            m, b = np.polyfit(x, y, 1)
+            for d in depths:
+                if (interpolation == "linear"):
+                    # In linear regression fit, PSI can slip below 0 PSI, which
+                    # is impossible; thus, enforce a minimum condition here
+                    # during the fit.
+                    new_psi = m*d + b if (m*d + b > 0) else 0
+                else:
+                    # TODO: Better understand non-linear/exponential trends in
+                    #       increase of SPR here.
+                    new_psi = 0
+                new_entry = pd.DataFrame([{
+                    "Date": group[0][0],
+                    "Compaction Level (index)": group[0][1],
+                    "Depth (inches)": d,
+                    "Average PSI": new_psi
+                }])
+                df = pd.concat(
+                    [df, new_entry],
+                    join="inner",
+                    ignore_index=True
+                )
+    return df
 
 def _load_pen_labels(path_base: str) -> pd.DataFrame:
     """
@@ -264,6 +316,13 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
         "pen_labels.csv"
     ])
     labels_df = _read_csv(path_pen_labels)
+
+    # Clean up "Depth" column (to make this an int rather than str).
+    vals = labels_df["Depth"].str.extract(r"^(\d+)\s+(.*)$")
+    labels_df["Depth"] = vals[0]
+
+    # Replace the "Depth" label for one with units.
+    labels_df = labels_df.rename(columns={"Depth": "Depth (inches)"})
 
     # Calculate average SPR for each depth.
     pen_cols = [
@@ -293,22 +352,27 @@ def _load_core_labels(path_base: str) -> dict:
     print(labels_df)
     exit()
 
-    # Calculate average SPR for each depth.
-    pen_cols = [
-            "Penetrometer PSI (sample 1)",
-            "Penetrometer PSI (sample 2)",
-            "Penetrometer PSI (sample 3)",
-            "Penetrometer PSI (sample 4)",
-            "Penetrometer PSI (sample 5)"
-    ]
+    # Calculate average SBD for each depth for each compaction level on a given
+    # date.
     labels_df["Average PSI"] = labels_df[pen_cols].mean(axis=1)
+
+    # TODO: Allow for inference of compaction levels at specific depths?
     print(labels)
     exit()
     return labels
 
-def load_new_datasets(path_base: str) -> list[dict]:
+def check_previously_run_datasets(path_output_dir: str) -> list[str]:
     """
-    load_new_datasets(path_base) -> datasets
+    check_previously_run_datasets(path_output_dir) -> [to_skip]
+
+    Load dataset labels that have already been processed.
+    """
+    # TODO.
+    return []
+
+def load_new_datasets(path_base: str, to_skip: list = []) -> list[dict]:
+    """
+    load_new_datasets(path_base, to_skip) -> datasets
 
     Import, label, and trim raw B1 CSV datasets from data collection trials.
     """
@@ -324,6 +388,10 @@ def load_new_datasets(path_base: str) -> list[dict]:
         "ERROR: Data input directory does not exist!"
     )
     for base, _, files in os.walk(path_base):
+        print(base)
+        print(files)
+        print()
+        """
         info = _load_dataset(base_path=base, file_names=files)
         # Only append info if it corresponds to a directory containing all 
         # required datasets.
@@ -333,17 +401,10 @@ def load_new_datasets(path_base: str) -> list[dict]:
                 verbose_datasets.append(info)
         except AttributeError:
             pass
+        """
+    exit()
 
     return verbose_datasets
-
-def _check_previously_run_datasets(path_output_dir: str) -> list[str]:
-    """
-    _check_previously_run_datasets(path_output_dir) -> [to_skip]
-
-    Load dataset labels that have already been processed.
-    """
-    # TODO.
-    return []
 
 def preprocess_dataset(
         path_input_dir: str,
@@ -381,10 +442,13 @@ def preprocess_dataset(
     # Check which datasets have already been formatted to skip.
     to_skip = []
     if not force:
-        to_skip += _check_previously_run_datasets(path_output_dir)
+        to_skip += check_previously_run_datasets(path_output_dir)
 
     # Comb through each directory to find each applicable data file.
-    verbose_datasets = load_new_datasets(path_input_dir)
+    verbose_datasets = load_new_datasets(
+            path_base=path_input_dir,
+            to_skip=to_skip
+        )
     assert (
         any(
             [len(info) > 0 for info in verbose_datasets]
