@@ -295,7 +295,9 @@ def _estimate_depth_pen_labels(
                 "Date": group[0][0],
                 "Compaction Level (index)": group[0][1],
                 "Depth (inches)": d,
-                "SPR (PSI, average)": new_psi
+                "SPR (PSI, average)": new_psi,
+                "SPR (PSI, variance)": None,
+                "Sample Size (# jabs)": 0
             }])
             df = pd.concat(
                 [df, new_entry],
@@ -323,9 +325,10 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
     # Replace the "Depth" label for one with units.
     labels_df = labels_df.rename(columns={"Depth": "Depth (inches)"})
     # Replace the "Average PSI" label for one that is more descriptive.
-    labels_df = labels_df.rename(columns={"Average PSI": "SPR (PSI, average)"})
+    # NOTE: This is unecessary since we do it again below.
+    #labels_df = labels_df.rename(columns={"Average PSI": "SPR (PSI, average)"})
 
-    # Calculate average SPR for each depth.
+    # Calculate SPR stats for each depth.
     pen_cols = [
             "Penetrometer PSI (sample 1)",
             "Penetrometer PSI (sample 2)",
@@ -334,6 +337,8 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
             "Penetrometer PSI (sample 5)"
     ]
     labels_df["SPR (PSI, average)"] = labels_df[pen_cols].mean(axis=1)
+    labels_df["SPR (PSI, variance)"] = labels_df[pen_cols].var(axis=1)
+    labels_df["Sample Size (# jabs)"] = labels_df[pen_cols].notna().sum(axis=1)
 
     # Generate new labels (if not currently present) for [4, 7, 10]" range.
     new_depths = [4, 7, 10]
@@ -370,7 +375,7 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
             "Date": group[0][0],
             "Compaction Level (index)": group[0][1],
             "Depth (inches)": group[0][2],
-            "Number of Samples": n,
+            "Sample Size (# cores)": n,
             "Core VWC (%, average)": vwc_avg,
             "Core VWC (%, variance)": vwc_var,
             "SBD (g/cm^3, average)": sbd_avg,
@@ -383,7 +388,7 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
             )
     return df_out
 
-def _load_core_labels(path_base: str) -> dict:
+def _load_core_labels(path_base: str) -> pd.DataFrame:
     """
     _load_core_labels(path_base) -> labels
     """
@@ -398,9 +403,7 @@ def _load_core_labels(path_base: str) -> dict:
     labels_df = convert_df_core_to_avgs(labels_df)
 
     # TODO: Allow for inference of compaction levels at specific depths?
-    print(labels)
-    exit()
-    return labels
+    return labels_df
 
 def check_previously_run_datasets(path_output_dir: str) -> list[str]:
     """
