@@ -279,7 +279,7 @@ def _estimate_depth_pen_labels(
 
     for group in grouped:
         x = group[1]["Depth (inches)"].to_numpy(dtype=float)
-        y = group[1]["Average SPR (PSI)"].to_numpy(dtype=float)
+        y = group[1]["SPR (PSI, average)"].to_numpy(dtype=float)
         m, b = np.polyfit(x, y, 1)
         for d in depths:
             if (interpolation == "linear"):
@@ -295,7 +295,7 @@ def _estimate_depth_pen_labels(
                 "Date": group[0][0],
                 "Compaction Level (index)": group[0][1],
                 "Depth (inches)": d,
-                "Average SPR (PSI)": new_psi
+                "SPR (PSI, average)": new_psi
             }])
             df = pd.concat(
                 [df, new_entry],
@@ -323,7 +323,7 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
     # Replace the "Depth" label for one with units.
     labels_df = labels_df.rename(columns={"Depth": "Depth (inches)"})
     # Replace the "Average PSI" label for one that is more descriptive.
-    labels_df = labels_df.rename(columns={"Average PSI": "Average SPR (PSI)"})
+    labels_df = labels_df.rename(columns={"Average PSI": "SPR (PSI, average)"})
 
     # Calculate average SPR for each depth.
     pen_cols = [
@@ -333,7 +333,7 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
             "Penetrometer PSI (sample 4)",
             "Penetrometer PSI (sample 5)"
     ]
-    labels_df["Average SPR (PSI)"] = labels_df[pen_cols].mean(axis=1)
+    labels_df["SPR (PSI, average)"] = labels_df[pen_cols].mean(axis=1)
 
     # Generate new labels (if not currently present) for [4, 7, 10]" range.
     new_depths = [4, 7, 10]
@@ -341,13 +341,17 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
 
     return labels_df
 
-def get_avg_sbd_to_df(df: pd.DataFrame) -> pd.DataFrame:
+def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
     """
-    get_avg_sbd_to_df(df) -> df
+    convert_df_core_to_avgs(df) -> df
 
-    Merge all rows of soil cores into single rows with averages and statistics.
+    Merge ground-truth info for VWC and SBD from soil cores into averages,
+    variances, and ns.
     """
-    # Group each entry by date, compaction level, and depth first.
+    # Start with a new, empty DataFrame.
+    df_out = None
+
+    # Group each entry by date, compaction level, and depth.
     grouped = df.groupby([
         "Date",
         "Compaction Level (index)",
@@ -355,33 +359,29 @@ def get_avg_sbd_to_df(df: pd.DataFrame) -> pd.DataFrame:
     ])
 
     for group in grouped:
-        print(group[1])
-        exit()
-        vwcs = group[1][]
-        y = group[1]["Average SPR (PSI)"].to_numpy(dtype=float)
-        m, b = np.polyfit(x, y, 1)
-        for d in depths:
-            if (interpolation == "linear"):
-                # In linear regression fit, PSI can slip below 0 PSI, which
-                # is impossible; thus, enforce a minimum condition here
-                # during the fit.
-                new_psi = m*d + b if (m*d + b > 0) else 0
-            else:
-                # TODO: Better understand non-linear/exponential trends in
-                #       increase of SPR here.
-                new_psi = 0
-            new_entry = pd.DataFrame([{
-                "Date": group[0][0],
-                "Compaction Level (index)": group[0][1],
-                "Depth (inches)": d,
-                "Average SPR (PSI)": new_psi
-            }])
-            df = pd.concat(
-                [df, new_entry],
+        # Average VWCs and SBDs from cores, collecting info on variance and
+        # sample size as we go.
+        n = len(group[1])
+        vwc_avg = group[1]["VWC (%, derived)"].mean()
+        vwc_var = group[1]["VWC (%, derived)"].var()
+        sbd_avg = group[1]["Bulk density (g/cm^3)"].mean()
+        sbd_var = group[1]["Bulk density (g/cm^3)"].var()
+        new_entry = pd.DataFrame([{
+            "Date": group[0][0],
+            "Compaction Level (index)": group[0][1],
+            "Depth (inches)": group[0][2],
+            "Number of Samples": n,
+            "Core VWC (%, average)": vwc_avg,
+            "Core VWC (%, variance)": vwc_var,
+            "SBD (g/cm^3, average)": sbd_avg,
+            "SBD (g/cm^3, variance)": sbd_var
+        }])
+        df_out = pd.concat(
+                [df_out, new_entry],
                 join="inner",
                 ignore_index=True
             )
-    return df
+    return df_out
 
 def _load_core_labels(path_base: str) -> dict:
     """
@@ -395,7 +395,7 @@ def _load_core_labels(path_base: str) -> dict:
 
     # Calculate average SBD for each depth for each compaction level on a given
     # date.
-    labels_df = get_avg_sbd_to_df(labels_df)
+    labels_df = convert_df_core_to_avgs(labels_df)
 
     # TODO: Allow for inference of compaction levels at specific depths?
     print(labels)
