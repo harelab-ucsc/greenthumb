@@ -420,11 +420,11 @@ def load_new_datasets(path_base: str, to_skip: list = []) -> list[dict]:
 
     Import, label, and trim raw B1 CSV datasets from data collection trials.
     """
-    # First load all labels.
+    # First load labels from the penetrometer and soil cores.
     labels_pen = _load_pen_labels(path_base=path_base)
     labels_core = _load_core_labels(path_base=path_base)
 
-    # Next load raw B1 datasets.
+    # Next load raw sensors feeds from TEROS-12 sensors and the B1.
     verbose_datasets = []
     assert (
         os.path.isdir(path_base)
