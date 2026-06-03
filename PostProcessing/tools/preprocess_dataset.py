@@ -305,7 +305,7 @@ def _estimate_depth_pen_labels(
                 "Compaction Level (index)": group[0][1],
                 "Depth (inches)": d,
                 "SPR (PSI, average)": new_psi,
-                "SPR (PSI, variance)": None,
+                "SPR (PSI, variance)": 0,
                 "Sample Size (# jabs)": 0
             }])
             df = pd.concat(
@@ -420,6 +420,18 @@ def load_teros12_data(path_base: str) -> pd.DataFrame:
     """
     return None
 
+def load_b1_datasets(path_base: str) -> pd.DataFrame:
+    """
+    load_b1_datasets(path_base) -> teros12_df
+    """
+    return None
+
+def load_chipotle_datasets(path_base: str) -> pd.DataFrame:
+    """
+    load_chipotle_datasets(path_base) -> teros12_df
+    """
+    return None
+
 def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     """
     load_datasets(path_base, to_skip) -> datasets
@@ -440,11 +452,17 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     # Next load and combine [valid] sensor feeds from TEROS-12 sensors on all
     # days.
     teros12_df = load_teros12_data(path_base=path_base)
+
+    # Load all B1 and Chipotle sensor streams into their own datasets with
+    # metadata attached (i.e. as dicts with structure:
+    #                           {"df": df, "date": <DATE>, ...}, etc).
+    b1_datasets = load_b1_datasets(path_base=path_base)
+    chipotle_datasets = load_chipotle_datasets(path_base=path_base)
+    """
     for base, _, files in os.walk(path_base):
         print(base)
         print(files)
         print()
-        """
         info = _load_dataset(base_path=base, file_names=files)
         # Only append info if it corresponds to a directory containing all 
         # required datasets.
@@ -454,10 +472,14 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
                 verbose_datasets.append(info)
         except AttributeError:
             pass
-        """
+    """
     exit()
 
-    return None, None, core_df, pen_df, None
+    return (b1_datasets,
+            chipotle_datasets,
+            core_df,
+            pen_df,
+            teros12_df)
 
 def preprocess_dataset(
         path_input_dir: str,
