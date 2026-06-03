@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    1 Jun 2026
+    2 Jun 2026
 
 Version:
-    1.0.1
+    1.0.2
 """
 import argparse
 import copy as cp
@@ -259,6 +259,15 @@ def _split_dataset(dataset: pd.DataFrame) -> dict:
         ]
     return info
 
+def check_previously_run_datasets(path_output_dir: str) -> list[str]:
+    """
+    check_previously_run_datasets(path_output_dir) -> [to_skip]
+
+    Load dataset labels that have already been processed.
+    """
+    # TODO.
+    return []
+
 def _estimate_depth_pen_labels(
     df: pd.DataFrame,
     depths: list[int],
@@ -306,27 +315,27 @@ def _estimate_depth_pen_labels(
             )
     return df
 
-def _load_pen_labels(path_base: str) -> pd.DataFrame:
+def load_pen_labels(path_base: str) -> pd.DataFrame:
     """
-    _load_pen_labels(path_base) -> labels
+    load_pen_labels(path_base) -> pen_df
     """
     # Load all values from the label file.
     path_pen_labels = "/".join([
         path_base,
         "pen_labels.csv"
     ])
-    labels_df = _read_csv(path_pen_labels)
+    pen_df = _read_csv(path_pen_labels)
 
     # NOTE: The below three actions could be addressed with updates to the data
     #       input pipeline.
     # Clean up "Depth" column (to make this an int rather than str).
-    vals = labels_df["Depth"].str.extract(r"^(\d+)\s+(.*)$")
-    labels_df["Depth"] = vals[0]
+    vals = pen_df["Depth"].str.extract(r"^(\d+)\s+(.*)$")
+    pen_df["Depth"] = vals[0]
     # Replace the "Depth" label for one with units.
-    labels_df = labels_df.rename(columns={"Depth": "Depth (inches)"})
+    pen_df = pen_df.rename(columns={"Depth": "Depth (inches)"})
     # Replace the "Average PSI" label for one that is more descriptive.
     # NOTE: This is unecessary since we do it again below.
-    #labels_df = labels_df.rename(columns={"Average PSI": "SPR (PSI, average)"})
+    #pen_df = pen_df.rename(columns={"Average PSI": "SPR (PSI, average)"})
 
     # Calculate SPR stats for each depth.
     pen_cols = [
@@ -336,15 +345,15 @@ def _load_pen_labels(path_base: str) -> pd.DataFrame:
             "Penetrometer PSI (sample 4)",
             "Penetrometer PSI (sample 5)"
     ]
-    labels_df["SPR (PSI, average)"] = labels_df[pen_cols].mean(axis=1)
-    labels_df["SPR (PSI, variance)"] = labels_df[pen_cols].var(axis=1)
-    labels_df["Sample Size (# jabs)"] = labels_df[pen_cols].notna().sum(axis=1)
+    pen_df["SPR (PSI, average)"] = pen_df[pen_cols].mean(axis=1)
+    pen_df["SPR (PSI, variance)"] = pen_df[pen_cols].var(axis=1)
+    pen_df["Sample Size (# jabs)"] = pen_df[pen_cols].notna().sum(axis=1)
 
     # Generate new labels (if not currently present) for [4, 7, 10]" range.
     new_depths = [4, 7, 10]
-    labels_df = _estimate_depth_pen_labels(df=labels_df, depths=new_depths)
+    pen_df = _estimate_depth_pen_labels(df=pen_df, depths=new_depths)
 
-    return labels_df
+    return pen_df
 
 def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -388,49 +397,49 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
             )
     return df_out
 
-def _load_core_labels(path_base: str) -> pd.DataFrame:
+def load_core_labels(path_base: str) -> pd.DataFrame:
     """
-    _load_core_labels(path_base) -> labels
+    load_core_labels(path_base) -> core_df
     """
     path_core_labels = "/".join([
         path_base,
         "core_labels.csv"
     ])
-    labels_df = _read_csv(path_core_labels)
+    core_df = _read_csv(path_core_labels)
 
     # Calculate average SBD for each depth for each compaction level on a given
     # date.
-    labels_df = convert_df_core_to_avgs(labels_df)
+    core_df = convert_df_core_to_avgs(core_df)
 
     # TODO: Allow for inference of compaction levels at specific depths?
-    return labels_df
+    return core_df
 
-def check_previously_run_datasets(path_output_dir: str) -> list[str]:
+def load_teros12_data(path_base: str) -> pd.DataFrame:
     """
-    check_previously_run_datasets(path_output_dir) -> [to_skip]
+    load_teros12_data(path_base) -> teros12_df
+    """
+    return None
 
-    Load dataset labels that have already been processed.
+def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     """
-    # TODO.
-    return []
-
-def load_new_datasets(path_base: str, to_skip: list = []) -> list[dict]:
-    """
-    load_new_datasets(path_base, to_skip) -> datasets
+    load_datasets(path_base, to_skip) -> datasets
 
     Import, label, and trim raw B1 CSV datasets from data collection trials.
     """
-    # First load labels from the penetrometer and soil cores.
-    labels_pen = _load_pen_labels(path_base=path_base)
-    labels_core = _load_core_labels(path_base=path_base)
-
-    # Next load raw sensors feeds from TEROS-12 sensors and the B1.
-    verbose_datasets = []
+    # Ensure that the base path actually exists.
     assert (
         os.path.isdir(path_base)
     ), (
         "ERROR: Data input directory does not exist!"
     )
+
+    # First load labels from the penetrometer (SPR) and soil cores (SBD, VWC).
+    core_df = load_core_labels(path_base=path_base)
+    pen_df = load_pen_labels(path_base=path_base)
+
+    # Next load and combine [valid] sensor feeds from TEROS-12 sensors on all
+    # days.
+    teros12_df = load_teros12_data(path_base=path_base)
     for base, _, files in os.walk(path_base):
         print(base)
         print(files)
@@ -448,7 +457,7 @@ def load_new_datasets(path_base: str, to_skip: list = []) -> list[dict]:
         """
     exit()
 
-    return verbose_datasets
+    return None, None, core_df, pen_df, None
 
 def preprocess_dataset(
         path_input_dir: str,
@@ -488,11 +497,22 @@ def preprocess_dataset(
     if not force:
         to_skip += check_previously_run_datasets(path_output_dir)
 
-    # Comb through each directory to find each applicable data file.
-    verbose_datasets = load_new_datasets(
+    # Process all desired datasets as follows:
+    #   1. Extract ground truth labels for SBD and SPR as DataFrames.
+    #   2. Combine all [valid] TEROS-12 data streams into one DataFrame.
+    #   3. Extract each B1 sensor feed and provide metadata about start/stop
+    #       times, test setting, etc.
+    #   4. Do the same as (3) for Chipotle scans.
+    (b1_datasets,
+     chipotle_datasets,
+     core_df,
+     pen_df,
+     teros12_dataset) = load_datasets(
             path_base=path_input_dir,
             to_skip=to_skip
         )
+
+    exit()
     assert (
         any(
             [len(info) > 0 for info in verbose_datasets]
