@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    2 Jun 2026
+    5 Jun 2026
 
 Version:
-    1.0.2
+    1.0.3
 """
 import argparse
 import copy as cp
@@ -20,6 +20,9 @@ import numpy as np
 import os
 import pandas as pd
 import re
+
+from datetime import datetime
+
 
 # TODO: Add "eval_id" to output dataset.
 # TODO: Debug strange directory naming convention.
@@ -268,6 +271,65 @@ def check_previously_run_datasets(path_output_dir: str) -> list[str]:
     # TODO.
     return []
 
+def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    convert_df_core_to_avgs(df) -> df
+
+    Merge ground-truth info for VWC and SBD from soil cores into averages,
+    variances, and ns.
+    """
+    # Start with a new, empty DataFrame.
+    df_out = None
+
+    # Group each entry by date, compaction level, and depth.
+    grouped = df.groupby([
+        "Date",
+        "Compaction Level (index)",
+        "Depth (inches)"
+    ])
+
+    for group in grouped:
+        # Average VWCs and SBDs from cores, collecting info on variance and
+        # sample size as we go.
+        n = len(group[1])
+        vwc_avg = group[1]["VWC (%, derived)"].mean()
+        vwc_var = group[1]["VWC (%, derived)"].var()
+        sbd_avg = group[1]["Bulk density (g/cm^3)"].mean()
+        sbd_var = group[1]["Bulk density (g/cm^3)"].var()
+        new_entry = pd.DataFrame([{
+            "Date": group[0][0],
+            "Compaction Level (index)": group[0][1],
+            "Depth (inches)": group[0][2],
+            "Sample Size (# cores)": n,
+            "Core VWC (%, average)": vwc_avg,
+            "Core VWC (%, variance)": vwc_var,
+            "SBD (g/cm^3, average)": sbd_avg,
+            "SBD (g/cm^3, variance)": sbd_var
+        }])
+        df_out = pd.concat(
+                [df_out, new_entry],
+                join="inner",
+                ignore_index=True
+            )
+    return df_out
+
+def load_core_labels(path_base: str) -> pd.DataFrame:
+    """
+    load_core_labels(path_base) -> core_df
+    """
+    path_core_labels = "/".join([
+        path_base,
+        "core_labels.csv"
+    ])
+    core_df = _read_csv(path_core_labels)
+
+    # Calculate average SBD for each depth for each compaction level on a given
+    # date.
+    core_df = convert_df_core_to_avgs(core_df)
+
+    # TODO: Allow for inference of compaction levels at specific depths?
+    return core_df
+
 def _estimate_depth_pen_labels(
     df: pd.DataFrame,
     depths: list[int],
@@ -355,70 +417,150 @@ def load_pen_labels(path_base: str) -> pd.DataFrame:
 
     return pen_df
 
-def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
+def teros12_file_is_valid(path: str) -> bool:
     """
-    convert_df_core_to_avgs(df) -> df
-
-    Merge ground-truth info for VWC and SBD from soil cores into averages,
-    variances, and ns.
+    teros12_file_is_valid(path) -> valid?
     """
-    # Start with a new, empty DataFrame.
-    df_out = None
+    return True
 
-    # Group each entry by date, compaction level, and depth.
-    grouped = df.groupby([
-        "Date",
-        "Compaction Level (index)",
-        "Depth (inches)"
-    ])
-
-    for group in grouped:
-        # Average VWCs and SBDs from cores, collecting info on variance and
-        # sample size as we go.
-        n = len(group[1])
-        vwc_avg = group[1]["VWC (%, derived)"].mean()
-        vwc_var = group[1]["VWC (%, derived)"].var()
-        sbd_avg = group[1]["Bulk density (g/cm^3)"].mean()
-        sbd_var = group[1]["Bulk density (g/cm^3)"].var()
-        new_entry = pd.DataFrame([{
-            "Date": group[0][0],
-            "Compaction Level (index)": group[0][1],
-            "Depth (inches)": group[0][2],
-            "Sample Size (# cores)": n,
-            "Core VWC (%, average)": vwc_avg,
-            "Core VWC (%, variance)": vwc_var,
-            "SBD (g/cm^3, average)": sbd_avg,
-            "SBD (g/cm^3, variance)": sbd_var
-        }])
-        df_out = pd.concat(
-                [df_out, new_entry],
-                join="inner",
-                ignore_index=True
-            )
-    return df_out
-
-def load_core_labels(path_base: str) -> pd.DataFrame:
+def ingest_teros12_data_from_path(path: str) -> pd.DataFrame:
     """
-    load_core_labels(path_base) -> core_df
+    ingest_teros12_data_from_path(path) -> teros12_df
     """
-    path_core_labels = "/".join([
-        path_base,
-        "core_labels.csv"
-    ])
-    core_df = _read_csv(path_core_labels)
+    return None
 
-    # Calculate average SBD for each depth for each compaction level on a given
-    # date.
-    core_df = convert_df_core_to_avgs(core_df)
+def _get_teros12_paths(path_base: str) -> list[str]:
+    """
+    _get_teros12_paths(path_base) -> paths
+    """
+    paths_teros12 = []
+    # Sift through each path in search of TEROS-12 data. Once you find a
+    # "teros12" directory, copy the full paths to a returned list.
+    for base, _, files in os.walk(path_base):
+        # Enter only the "teros12" folders.
+        if "teros12" in base:
+            for file in files:
+                # Only ingest valid TEROS-12 data files.
+                fpath = "/".join([base, file])
+                if (teros12_file_is_valid(fpath)):
+                    paths_teros12.append(fpath)
+    return paths_teros12
 
-    # TODO: Allow for inference of compaction levels at specific depths?
-    return core_df
 
+def _get_teros12_ds_labels_from_path(path: str) -> dict:
+    """
+    _get_teros12_ds_labels_from_path(path) -> ds_labels_dict
+
+    TEROS-12 file paths are expected to follow the following format:
+
+        <DEPTH>inch-teros12-<DATE>_<TIME>-sensor_<SENSOR #>.csv
+
+    This method extracts depth (inches), date, time, and sensor #.
+    """
+    labels_raw = path.split("/")[-1].split("-")
+
+    # Assign metadata labels based on label location.
+    try:
+        l_depth = int(labels_raw[0].split("inch")[0])
+    except ValueError:
+        print(f"Could not get TEROS-12 depth label from {path}; ")
+              f"skipping...")
+        return None
+
+    try:
+        l_datetime_start = datetime.strptime(labels_raw[2], "%Y%m%d_%H%M%S")
+    except ValueError:
+        print(f"Could not get TEROS-12 start time label from {path}; "
+              f"skipping...")
+        return None
+
+    try:
+        l_sensor_idx = labels_raw[-1].split("_")[-1].split(".")[0]
+    except ValueError as e:
+        print(f"Could not get TEROS-12 sensor index label from {path}; "
+              f"skipping...")
+        return None
+
+    # Correct depths if improper depth recorded.
+    ## NOTE: After 20260515, all tests were done with 4", 7", and 10" depths.
+    l_depths_to_change = [3, 6, 9]
+    if (l_datetime_start >= datetime(year=2026, month=5, day=15)):
+        # All improperly-labeled depths should only need to be incremented by 1.
+        if l_depth in l_depths_to_change:
+            l_depth += 1
+
+    return {
+            "depth": l_depth,
+            "dt_start": l_datetime_start,
+            "sensor_idx": l_sensor_idx
+        }
+
+def _extract_labeled_teros12_dfs_from_paths(
+        paths: list[str]
+    ) -> list[pd.DataFrame]:
+    """
+    _extract_labeled_teros12_dfs_from_paths(paths) -> dfs
+    """
+    dfs = []
+    for path in paths:
+        # Extract labels from path.
+        ds_labels_dict = _get_teros12_ds_labels_from_path(path)
+        print(ds_labels_dict)
+
+        # Extract/Format CSV data from each dataset as DataFrames.
+    exit()
+
+    return dfs
+
+def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
+    """
+    ingest_teros12_data_from_path(paths) -> df
+
+    Convert a list of TEROS-12 data paths to one DataFrame.
+    """
+    # First generate a list of TEROS-12 labeled DataFrames.
+    teros12_dfs_all = _extract_labeled_teros12_dfs_from_paths(paths=paths)
+
+    # Filter out invalid datasets.
+
+    # Merge together all TEROS-12 DataFrames into one (with labels).
+
+    """
+    info = _load_dataset(base_path=base, file_names=files)
+    # Only append info if it corresponds to a directory containing all 
+    # required datasets.
+    try:
+        if not info["dataset"]["combined"].empty:
+            print(f"Adding {info['label']}!")
+            verbose_datasets.append(info)
+    except AttributeError:
+        pass
+    """
+
+    # Filter out invalid datasets.
+
+    # Merge all TEROS-12 data into one DataFrame.
+    """
+    teros12_df = pd.concat(
+            [teros12_df, new_entry],
+            join="inner",
+            ignore_index=True
+        )
+    """
+
+    
 def load_teros12_data(path_base: str) -> pd.DataFrame:
     """
     load_teros12_data(path_base) -> teros12_df
     """
-    return None
+    # Get the paths of each TEROS-12 data file.
+    paths_teros12 = _get_teros12_paths(path_base=path_base)
+
+    # Extract sensor data and metadata from each valid file path and convert to
+    # a single DataFrame.
+    df_teros12 = extract_teros12_data_from_paths(paths_teros12)
+
+    return df_teros12 
 
 def load_b1_datasets(path_base: str) -> pd.DataFrame:
     """
@@ -458,21 +600,6 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     #                           {"df": df, "date": <DATE>, ...}, etc).
     b1_datasets = load_b1_datasets(path_base=path_base)
     chipotle_datasets = load_chipotle_datasets(path_base=path_base)
-    """
-    for base, _, files in os.walk(path_base):
-        print(base)
-        print(files)
-        print()
-        info = _load_dataset(base_path=base, file_names=files)
-        # Only append info if it corresponds to a directory containing all 
-        # required datasets.
-        try:
-            if not info["dataset"]["combined"].empty:
-                print(f"Adding {info['label']}!")
-                verbose_datasets.append(info)
-        except AttributeError:
-            pass
-    """
     exit()
 
     return (b1_datasets,
