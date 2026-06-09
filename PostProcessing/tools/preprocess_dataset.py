@@ -21,7 +21,7 @@ import os
 import pandas as pd
 import re
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # TODO: Add "eval_id" to output dataset.
@@ -484,22 +484,22 @@ def _get_teros12_ds_labels_from_path(path: str) -> dict:
     try:
         l_depth = int(labels_raw[0].split("inch")[0])
     except ValueError:
-        print(f"Could not get TEROS-12 depth label from {path}; "
-              f"skipping...")
+        print(f"WARNING: Could not get TEROS-12 depth label from {path};"
+              f" skipping...")
         return None
 
     try:
         l_datetime_start = datetime.strptime(labels_raw[2], "%Y%m%d_%H%M%S")
     except ValueError:
-        print(f"Could not get TEROS-12 start time label from {path}; "
-              f"skipping...")
+        print(f"WARNING: Could not get TEROS-12 start time label from {path};"
+              f" skipping...")
         return None
 
     try:
         l_sensor_idx = labels_raw[-1].split("_")[-1].split(".")[0]
     except ValueError as e:
-        print(f"Could not get TEROS-12 sensor index label from {path}; "
-              f"skipping...")
+        print(f"WARNING: Could not get TEROS-12 sensor index label from {path};"
+              f" skipping...")
         return None
 
     # Correct depths if improper depth recorded.
@@ -511,9 +511,9 @@ def _get_teros12_ds_labels_from_path(path: str) -> dict:
             l_depth += 1
 
     return {
-            "depth": l_depth,
-            "dt_start": l_datetime_start,
-            "sensor_idx": l_sensor_idx
+            "depth (inches)": l_depth,
+            "datetime start": l_datetime_start,
+            "sensor index": l_sensor_idx
         }
 
 def _extract_labeled_teros12_dfs_from_paths(
@@ -530,15 +530,96 @@ def _extract_labeled_teros12_dfs_from_paths(
         # Extract/Format CSV data from each dataset as DataFrames.
         try:
             df = _read_csv(path, ds_type="teros12")
-            print(df)
-            exit()
         except pd.errors.ParserError:
-            print(path)
-        print(df)
-        exit()
-    exit()
+            print(f"WARNING: Dataset at {path} invalid CSV.")
+            continue
+
+        # Label each DataFrame.
+        for label in ds_labels_dict.keys():
+            df[label] = ds_labels_dict[label]
+
+        # Append DataFrame.
+        dfs.append(df)
 
     return dfs
+
+def _group_teros12_dfs_by_session(
+        dfs: list[pd.DataFrame]
+    ) -> list[pd.DataFrame]:
+    """
+    _group_teros12_dfs_by_session(dfs) -> dfs
+    """
+    dfs_out = []        # Holder for all final, grouped DataFrames.
+    df_groups = [] 
+    t_delta_thresh = 5  # Number of seconds between starting data collection
+                        # sessions to consider a file as part of the same
+                        # dataset.
+    for df in dfs:
+        # Create groups of start timestamps based on their proximity to others.
+        l_start_datetime = df["datetime start"][0]
+        # It is sufficient to check against the first entry of each group based
+        # on threshold.
+        grouped = False
+        for group in df_groups:
+            group_datetime = group[0]["datetime start"][0]
+            if (abs((
+                l_start_datetime - group_datetime
+                ).seconds) <= t_delta_thresh):
+                # Add to existing group if start timestamp within threshold.
+                group.append(df)
+                grouped = True
+        if not grouped:
+            # Create a new group if not within threshold of any group.
+            df_groups.append([df])
+    
+    # Now combine members of each group into single DataFrames.
+    for group in df_groups:
+        df_grouped = pd.concat(
+                group,
+                join="inner",
+                ignore_index=True
+            )
+        dfs_out.append(df_grouped)
+
+    return dfs_out
+
+
+def _filter_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """
+    _filter_teros12_dfs(dfs) -> dfs
+
+    Scrap TEROS-12 datasets which are invalid for the following reasons:
+        + Estimated VWC exceeds wetness threshold or fails to meet dryness
+          threshold.
+        + More?
+    """
+    # Filter criteria.
+    vwc_max = 0.21
+    vwc_min = 0.04
+
+    dfs_filtered = []
+
+    dfs_no_start = len(dfs)
+
+    for df in dfs:
+        # Filter out VWCs outside of the bounds of acceptable by collecting
+        # session labels (remove all from that set).
+        if (float(df["VWC"].max()) > vwc_max):
+            l_datetime = datetime.strftime(df["datetime start"][0],
+                                           "%Y%m%d_%H%M%S")
+            print(f"Filtering out data from {l_datetime}: > VWC_max...")
+        elif (float(df["VWC"].min()) < vwc_min):
+            l_datetime = datetime.strftime(df["datetime start"][0],
+                                           "%Y%m%d_%H%M%S")
+            print(f"Filtering out data from {l_datetime}: < VWC_min...")
+        else:
+            dfs_filtered.append(df)
+
+    dfs_no_end = len(dfs_filtered)
+    print(f"\r\nSUCCESS: Filtered out {dfs_no_start - dfs_no_end} TEROS-12 "
+          f"datasets!")
+
+    return dfs_filtered
 
 def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
     """
@@ -547,36 +628,23 @@ def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
     Convert a list of TEROS-12 data paths to one DataFrame.
     """
     # First generate a list of TEROS-12 labeled DataFrames.
-    teros12_dfs_all = _extract_labeled_teros12_dfs_from_paths(paths=paths)
+    dfs_teros12_all = _extract_labeled_teros12_dfs_from_paths(paths=paths)
+
+    # Group together TEROS-12 DataFrames by session.
+    dfs_teros12_grouped = _group_teros12_dfs_by_session(dfs=dfs_teros12_all)
 
     # Filter out invalid datasets.
+    dfs_teros12_filtered = _filter_teros12_dfs(dfs=dfs_teros12_grouped)
 
     # Merge together all TEROS-12 DataFrames into one (with labels).
-
-    """
-    info = _load_dataset(base_path=base, file_names=files)
-    # Only append info if it corresponds to a directory containing all 
-    # required datasets.
-    try:
-        if not info["dataset"]["combined"].empty:
-            print(f"Adding {info['label']}!")
-            verbose_datasets.append(info)
-    except AttributeError:
-        pass
-    """
-
-    # Filter out invalid datasets.
-
-    # Merge all TEROS-12 data into one DataFrame.
-    """
-    teros12_df = pd.concat(
-            [teros12_df, new_entry],
+    df_teros12 = pd.concat(
+            dfs_teros12_filtered,
             join="inner",
             ignore_index=True
         )
-    """
 
-    
+    return df_teros12
+
 def load_teros12_data(path_base: str) -> pd.DataFrame:
     """
     load_teros12_data(path_base) -> teros12_df
@@ -690,6 +758,28 @@ def preprocess_dataset(
         )
 
     exit()
+    """
+    info = _load_dataset(base_path=base, file_names=files)
+    # Only append info if it corresponds to a directory containing all 
+    # required datasets.
+    try:
+        if not info["dataset"]["combined"].empty:
+            print(f"Adding {info['label']}!")
+            verbose_datasets.append(info)
+    except AttributeError:
+        pass
+    """
+
+    # Filter out invalid datasets.
+
+    # Merge all TEROS-12 data into one DataFrame.
+    """
+    teros12_df = pd.concat(
+            [teros12_df, new_entry],
+            join="inner",
+            ignore_index=True
+        )
+    """
     assert (
         any(
             [len(info) > 0 for info in verbose_datasets]
