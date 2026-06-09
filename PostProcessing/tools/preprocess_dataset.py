@@ -27,11 +27,32 @@ from datetime import datetime
 # TODO: Add "eval_id" to output dataset.
 # TODO: Debug strange directory naming convention.
 
-def _read_csv(path: str) -> pd.DataFrame:
-    """Read CSV file and return a dataset."""
-    # NOTE: May miss data due to bad lines being skipped.
-    #return pd.read_csv(path, on_bad_lines="skip")
-    return pd.read_csv(path)
+def _read_csv(path: str, ds_type: str = "") -> pd.DataFrame:
+    """
+    Read CSV file and return a dataset.
+
+    Args:
+        path    (str)
+        ds_type (str)   Dataset type label. Accepted labels include:
+                        + teros12   - TEROS-12 data.
+                        + b1        - Unitree B1 data.
+                        All other values will default to normal CSV format.
+    """
+    if ds_type == "teros12":
+        data_rows = []
+        with open(path, "r+") as csvfp:
+            reader = csv.reader(csvfp)
+            # The first two rows of these files contains metadata and should
+            # be skipped.
+            for row in reader:
+                if (len(row) <= 1):
+                    continue
+                data_rows.append(row)
+        return pd.DataFrame(data=data_rows[1:], columns=data_rows[0])
+    else:
+        # NOTE: May miss data due to bad lines being skipped with the below.
+        #return pd.read_csv(path, on_bad_lines="skip")
+        return pd.read_csv(path)
 
 def _write_dataset(dataset: pd.DataFrame, path: str):
     # First create any required parent directories.
@@ -463,7 +484,7 @@ def _get_teros12_ds_labels_from_path(path: str) -> dict:
     try:
         l_depth = int(labels_raw[0].split("inch")[0])
     except ValueError:
-        print(f"Could not get TEROS-12 depth label from {path}; ")
+        print(f"Could not get TEROS-12 depth label from {path}; "
               f"skipping...")
         return None
 
@@ -505,9 +526,16 @@ def _extract_labeled_teros12_dfs_from_paths(
     for path in paths:
         # Extract labels from path.
         ds_labels_dict = _get_teros12_ds_labels_from_path(path)
-        print(ds_labels_dict)
 
         # Extract/Format CSV data from each dataset as DataFrames.
+        try:
+            df = _read_csv(path, ds_type="teros12")
+            print(df)
+            exit()
+        except pd.errors.ParserError:
+            print(path)
+        print(df)
+        exit()
     exit()
 
     return dfs
