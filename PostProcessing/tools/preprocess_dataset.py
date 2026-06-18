@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    5 Jun 2026
+    17 Jun 2026
 
 Version:
-    1.0.3
+    1.0.5
 """
 import argparse
 import copy as cp
@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 
 # TODO: Add "eval_id" to output dataset.
 # TODO: Debug strange directory naming convention.
+# TODO: Separate code for each device type into specialized submodules/classes.
 
 def _read_csv(path: str, ds_type: str = "") -> pd.DataFrame:
     """
@@ -658,11 +659,52 @@ def load_teros12_data(path_base: str) -> pd.DataFrame:
 
     return df_teros12 
 
-def load_b1_datasets(path_base: str) -> pd.DataFrame:
+def b1_file_is_valid(path: str) -> bool:
     """
-    load_b1_datasets(path_base) -> teros12_df
+    b1_file_is_valid(path) -> is_valid
+    """
+    # TODO
+    return True
+
+def _get_b1_paths(path_base: str) -> list[str]:
+    """
+    _get_b1_paths(path_base) -> paths
+    """
+    paths_b1 = []
+    # Sift through each path in search of B1 datastreams. Once you find a
+    # "b1" directory, copy the full paths to a returned list.
+    for base, _, files in os.walk(path_base):
+        # Enter only the "b1" folders.
+        if "b1" in base:
+            for file in files:
+                # Only ingest valid B1 data files.
+                fpath = "/".join([base, file])
+                if (b1_file_is_valid(fpath)):
+                    paths_b1.append(fpath)
+    return paths_b1
+
+def extract_b1_data_from_paths(paths: list[str]) -> list[pd.DataFrame]:
+    """
+    extract_b1_data_from_paths(paths) -> dfs_b1
     """
     return None
+
+def load_b1_datasets(path_base: str) -> list[pd.DataFrame]:
+    """
+    load_b1_datasets(path_base) -> b1_dfs
+
+    Each B1 DataFrame generated herein is appropriately polished.
+    """
+    # Get the paths of each B1 data file.
+    paths_b1 = _get_b1_paths(path_base=path_base)
+    print(paths_b1)
+    exit(1)
+
+    # Extract sensor data and metadata from each valid file path and convert to
+    # labeled dataframes.
+    dfs_b1 = extract_b1_data_from_paths(paths_b1)
+
+    return dfs_b1
 
 def load_chipotle_datasets(path_base: str) -> pd.DataFrame:
     """
@@ -694,8 +736,8 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     # Load all B1 and Chipotle sensor streams into their own datasets with
     # metadata attached (i.e. as dicts with structure:
     #                           {"df": df, "date": <DATE>, ...}, etc).
-    b1_datasets = load_b1_datasets(path_base=path_base)
-    chipotle_datasets = load_chipotle_datasets(path_base=path_base)
+    b1_dfs = load_b1_datasets(path_base=path_base)
+    chipotle_dfs = load_chipotle_datasets(path_base=path_base)
     exit()
 
     return (b1_datasets,
