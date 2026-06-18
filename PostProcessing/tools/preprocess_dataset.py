@@ -833,6 +833,8 @@ def load_b1_datasets(path_base: str) -> list[pd.DataFrame]:
     # Extract sensor data and metadata from each valid file path and convert to
     # labeled dataframes.
     dfs_b1 = extract_b1_data_from_paths(paths_b1)
+    
+    print(f"SUCCESS: Ingested {len(dfs_b1)} B1 datasets!")
 
     return dfs_b1
 
@@ -840,6 +842,7 @@ def load_chipotle_datasets(path_base: str) -> pd.DataFrame:
     """
     load_chipotle_datasets(path_base) -> teros12_df
     """
+    # TODO: For multimodal models.
     return None
 
 def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
@@ -856,26 +859,76 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     )
 
     # First load labels from the penetrometer (SPR) and soil cores (SBD, VWC).
-    core_df = load_core_labels(path_base=path_base)
-    pen_df = load_pen_labels(path_base=path_base)
+    df_cores = load_core_labels(path_base=path_base)
+    df_pen = load_pen_labels(path_base=path_base)
 
     # Next load and combine [valid] sensor feeds from TEROS-12 sensors on all
     # days.
-    teros12_df = load_teros12_data(path_base=path_base)
+    df_teros12 = load_teros12_data(path_base=path_base)
 
     # Load all B1 and Chipotle sensor streams into their own datasets with
     # metadata attached (i.e. as dicts with structure:
     #                           {"df": df, "date": <DATE>, ...}, etc).
-    b1_dfs = load_b1_datasets(path_base=path_base)
-    chipotle_dfs = load_chipotle_datasets(path_base=path_base)
-    print(b1_dfs[-1])
+    dfs_b1 = load_b1_datasets(path_base=path_base)
+    dfs_chipotle = load_chipotle_datasets(path_base=path_base)
+
+    return (dfs_b1,
+            dfs_chipotle,
+            df_cores,
+            df_pen,
+            df_teros12)
+
+def _label_b1_compaction(
+        df_b1: pd.DataFrame,
+        df_cores: pd.DataFrame, 
+        df_pen: pd.DataFrame
+    ) -> pd.DataFrame:
+    """
+    _label_b1_compaction(...) -> df_labeled
+    """
+    print(df_cores.columns.values)
+    print(df_pen.columns.values)
     exit()
 
-    return (b1_datasets,
-            chipotle_datasets,
-            core_df,
-            pen_df,
-            teros12_df)
+def _label_b1_wetness(
+        df_b1: pd.DataFrame,
+        df_teros12: pd.DataFrame
+    ) -> pd.DataFrame:
+    """
+    _label_b1_wetness(...) -> df_labeled
+    """
+    # TODO
+    return df_b1
+
+def label_dfs_b1(
+        dfs_b1: list[pd.DataFrame],
+        df_cores: pd.DataFrame,
+        df_pen: pd.DataFrame,
+        df_teros12: pd.DataFrame
+    ):
+    """
+    label_dfs_b1(...) -> dfs_b1_labeled
+    """
+    dfs_b1_labeled = []
+    # Iterate through each B1 dataset.
+    for df in dfs_b1:
+        # Label SPRs and BDs from core and penetrometer measurements for each
+        # B1 dataset based date/time, compaction level, and moisture level.
+        df_labeled = _label_b1_compaction(
+            df_b1=df,
+            df_cores=df_cores,
+            df_pen=df_pen
+        )
+        
+        # Add labels found from the TEROS12 DF to each B1 dataset.
+        df_labeled = _label_b1_wetness(
+            df_b1=df,
+            df_teros12=df_teros12
+        )
+
+        dfs_b1_labeled.append(df_labeled)
+
+    return dfs_b1_labeled 
 
 def preprocess_dataset(
         path_input_dir: str,
@@ -921,16 +974,24 @@ def preprocess_dataset(
     #   3. Extract each B1 sensor feed and provide metadata about start/stop
     #       times, test setting, etc.
     #   4. Do the same as (3) for Chipotle scans.
-    (b1_datasets,
-     chipotle_datasets,
-     core_df,
-     pen_df,
-     teros12_dataset) = load_datasets(
+    (dfs_b1,
+     dfs_chipotle,
+     df_cores,
+     df_pen,
+     df_teros12) = load_datasets(
             path_base=path_input_dir,
             to_skip=to_skip
         )
 
-    exit()
+    # Label B1 and Chipotle datasets (or other sensing modes under test).
+    dfs_b1_out = label_dfs_b1(
+        dfs_b1=dfs_b1,
+        df_cores=df_cores,
+        df_pen=df_pen,
+        df_teros12=df_teros12)
+
+    # Write fully-processed, labeled datasets to files for further processing/
+    # learning/training.
     """
     info = _load_dataset(base_path=base, file_names=files)
     # Only append info if it corresponds to a directory containing all 
