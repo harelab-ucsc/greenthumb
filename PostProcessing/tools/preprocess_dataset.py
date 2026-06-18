@@ -22,6 +22,7 @@ import pandas as pd
 import re
 
 from datetime import datetime, timedelta
+from io import StringIO
 
 
 # TODO: Add "eval_id" to output dataset.
@@ -50,6 +51,18 @@ def _read_csv(path: str, ds_type: str = "") -> pd.DataFrame:
                     continue
                 data_rows.append(row)
         return pd.DataFrame(data=data_rows[1:], columns=data_rows[0])
+    elif ds_type == "b1":
+        with open(path, "r") as fp:
+            data_array = [
+                line for i, line in enumerate(fp) if i == 0 or "," in line
+            ]
+        # Convert CSV array into pandas DataFrame.
+        try:
+            return pd.read_csv(StringIO("".join(data_array)))
+        except Exception as e:
+            print(f"Could not read {path}!")
+            print(e)
+            exit()
     else:
         # NOTE: May miss data due to bad lines being skipped with the below.
         #return pd.read_csv(path, on_bad_lines="skip")
@@ -683,11 +696,130 @@ def _get_b1_paths(path_base: str) -> list[str]:
                     paths_b1.append(fpath)
     return paths_b1
 
+def _get_b1_ds_labels_from_path(path: str) -> dict:
+    """
+    _get_b1_ds_labels_from_path(path) -> labels:
+    """
+    labels_raw = path.split("/")[-1].split("-")
+
+    # Look-up tables (LUTs) for various labels.
+
+    ## Indicates the number of times that the box was sprayed before data was
+    ## collected.
+    lut_dampness = {
+            "fieldDry": 0,
+            "fieldDamp1": 2
+        }
+
+    # Assign metadata labels based on label location.
+    try:
+        l_comp_level = int(labels_raw[-1].split(".")[0])
+    except ValueError:
+        print(f"WARNING: Could not get compaction level from {path};"
+              f" skipping...")
+        return None
+
+    try:
+        l_name = "-".join([labels_raw[0], labels_raw[1]]) 
+    except ValueError:
+        print(f"WARNING: Could not get B1 dataset label from {path};"
+              f" skipping...")
+        return None
+
+    try:
+        l_wet_level = lut_dampness[labels_raw[-2]]
+    except ValueError as e:
+        print(f"WARNING: Could not get dampness level from {path};"
+              f" skipping...")
+        return None
+
+    return {
+            "compaction level": l_comp_level,
+            "dataset label": l_name,
+            "spray events": l_wet_level
+        }
+
+def scrub_b1_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    scrub_df(df) -> df
+
+    Description:
+        Excise both columns that never change in value and long portions of
+        data which remain 0 (i.e. at the beginning).
+        
+        Copied from `step_detector.py` almost verbatim.
+
+    Args:
+        df  (pd.DataFrame)
+
+    Returns:
+        df  (pd.DataFrame)
+    """
+    # Start with only numeric columns.
+    numeric = df.select_dtypes(include=["number"])
+
+    # First remove constant and 0.0 columns (from Perplexity).
+    df = df.loc[:, df.nunique(dropna=False) > 1].copy()
+    df = df.loc[:, df.var(numeric_only=True) != 0]
+
+    # Next, delete datapoints which remain 0.0 for a while (i.e. at the
+    # start of data collection).
+    zero_threshold = 0.9    # Fraction of columns that can be 0.0 to be dropped.
+    if not numeric.empty:
+        zero_fraction = (numeric == 0.0).mean(axis=1)
+        df = df.loc[zero_fraction < zero_threshold].copy()
+
+    return df
+
+
+def _extract_labeled_b1_dfs_from_paths(paths: list[str]) -> list[pd.DataFrame]:
+    """
+    _extract_labeled_b1_dfs_from_paths(paths) -> dfs_b1
+    """
+    dfs = []
+    for path in paths:
+        # Pull metadata from path names.
+        ds_labels_dict = _get_b1_ds_labels_from_path(path)
+
+        # Extract/Format CSV data from each dataset as DataFrames.
+        try:
+            df = _read_csv(path, ds_type="b1")
+        except pd.errors.ParserError:
+            print(f"WARNING: Dataset at {path} invalid CSV.")
+            continue
+
+        # Trim both empty data columns (in the case of early test data) and
+        # long sequences of nothing (as in the beginning).
+        df = scrub_b1_df(df)
+
+        print(path)
+        # Label each DataFrame.
+        for label in ds_labels_dict.keys():
+            df[label] = ds_labels_dict[label]
+
+        # Append DataFrame.
+        dfs.append(df)
+
+    return dfs
+
+def _filter_b1_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """
+    _filter_b1_dfs(dfs) -> dfs_b1
+    """
+    # TODO: Incorporate filtering methods from `step_detector` module.
+    return dfs
+
 def extract_b1_data_from_paths(paths: list[str]) -> list[pd.DataFrame]:
     """
     extract_b1_data_from_paths(paths) -> dfs_b1
     """
-    return None
+    # Generate labeled B1 DataFrames from paths.
+    dfs_b1_all = _extract_labeled_b1_dfs_from_paths(paths=paths)
+
+    # Filter out invalid DataFrames.
+    dfs_b1_filtered = _filter_b1_dfs(dfs=dfs_b1_all)
+
+    return dfs_b1_filtered
 
 def load_b1_datasets(path_base: str) -> list[pd.DataFrame]:
     """
@@ -697,8 +829,6 @@ def load_b1_datasets(path_base: str) -> list[pd.DataFrame]:
     """
     # Get the paths of each B1 data file.
     paths_b1 = _get_b1_paths(path_base=path_base)
-    print(paths_b1)
-    exit(1)
 
     # Extract sensor data and metadata from each valid file path and convert to
     # labeled dataframes.
@@ -738,6 +868,7 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     #                           {"df": df, "date": <DATE>, ...}, etc).
     b1_dfs = load_b1_datasets(path_base=path_base)
     chipotle_dfs = load_chipotle_datasets(path_base=path_base)
+    print(b1_dfs[-1])
     exit()
 
     return (b1_datasets,
