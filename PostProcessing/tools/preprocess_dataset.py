@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    17 Jun 2026
+    19 Jun 2026
 
 Version:
-    1.0.5
+    1.0.6
 """
 import argparse
 import copy as cp
@@ -386,7 +386,13 @@ def _estimate_depth_pen_labels(
     for group in grouped:
         x = group[1]["Depth (inches)"].to_numpy(dtype=float)
         y = group[1]["SPR (PSI, average)"].to_numpy(dtype=float)
-        m, b = np.polyfit(x, y, 1)
+        try:
+            m, b = np.polyfit(x, y, 1)
+        except Exception as e:
+            print(x)
+            print(y)
+            print(e)
+            exit()
         for d in depths:
             if (interpolation == "linear"):
                 # In linear regression fit, PSI can slip below 0 PSI, which
@@ -426,6 +432,7 @@ def load_pen_labels(path_base: str) -> pd.DataFrame:
     # NOTE: The below three actions could be addressed with updates to the data
     #       input pipeline.
     # Clean up "Depth" column (to make this an int rather than str).
+    # TODO: Allow this to accept integer depth values as well.
     vals = pen_df["Depth"].str.extract(r"^(\d+)\s+(.*)$")
     pen_df["Depth"] = vals[0]
     # Replace the "Depth" label for one with units.
@@ -733,10 +740,20 @@ def _get_b1_ds_labels_from_path(path: str) -> dict:
               f" skipping...")
         return None
 
+    try:
+        l_date = datetime.strptime(
+                labels_raw[0], "%Y%m%d_%H%M%S"
+            ).strftime("%-m/%-d/%Y")
+    except ValueError:
+        print(f"WARNING: Could not get B1 dataset date label from {path};"
+              f" skipping...")
+        return None
+
     return {
-            "compaction level": l_comp_level,
-            "dataset label": l_name,
-            "spray events": l_wet_level
+            "Compaction Level (index)": l_comp_level,
+            "Dataset Label": l_name,
+            "Date": l_date,
+            "SWC Level (index)": l_wet_level
         }
 
 def scrub_b1_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -792,7 +809,6 @@ def _extract_labeled_b1_dfs_from_paths(paths: list[str]) -> list[pd.DataFrame]:
         # long sequences of nothing (as in the beginning).
         df = scrub_b1_df(df)
 
-        print(path)
         # Label each DataFrame.
         for label in ds_labels_dict.keys():
             df[label] = ds_labels_dict[label]
@@ -886,8 +902,22 @@ def _label_b1_compaction(
     """
     _label_b1_compaction(...) -> df_labeled
     """
-    print(df_cores.columns.values)
-    print(df_pen.columns.values)
+    # Match ground truth soil compaction info to B1 dataset date, compaction
+    # level, and soil moisture level.
+    l_date = df_b1["Date"].values[0]
+    l_compaction_level = df_b1["Compaction Level (index)"].values[0]
+    l_swc_level = df_b1["SWC Level (index)"].values[0]
+
+    print(l_date)
+    print(df_cores.loc[df_cores["Date"] == l_date, ["Depth (inches)", "SBD (g/cm^3, average)"]])
+    exit()
+    print(df_cores.loc[df_cores["Depth (inches)"] == 0,
+                       ["Date", "Depth (inches)", "SBD (g/cm^3, average)"]])
+    print(df_pen.loc[df_pen["Depth (inches)"] == str(3),
+                     ["Date", "Depth (inches)", "SPR (PSI, average)"]])
+    print(df_b1[["Compaction Level (index)", "SWC Level (index)"]])
+    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
+    #                       absorbed.
     exit()
 
 def _label_b1_wetness(
@@ -990,6 +1020,7 @@ def preprocess_dataset(
         df_pen=df_pen,
         df_teros12=df_teros12)
 
+    exit()
     # Write fully-processed, labeled datasets to files for further processing/
     # learning/training.
     """
