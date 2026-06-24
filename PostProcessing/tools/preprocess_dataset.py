@@ -327,8 +327,9 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
         # Average VWCs and SBDs from cores, collecting info on variance and
         # sample size as we go.
         n = len(group[1])
-        vwc_avg = group[1]["VWC (%, derived)"].mean()
-        vwc_var = group[1]["VWC (%, derived)"].var()
+        # NOTE: These "VWC (%, derived)" values are actually GWC.
+        gwc_avg = group[1]["VWC (%, derived)"].mean()
+        gwc_var = group[1]["VWC (%, derived)"].var()
         sbd_avg = group[1]["Bulk density (g/cm^3)"].mean()
         sbd_var = group[1]["Bulk density (g/cm^3)"].var()
         new_entry = pd.DataFrame([{
@@ -336,8 +337,8 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
             "Compaction Level (index)": group[0][1],
             "Depth (inches)": group[0][2],
             "Sample Size (# cores)": n,
-            "Core VWC (%, average)": vwc_avg,
-            "Core VWC (%, variance)": vwc_var,
+            "Core GWC (%, average)": gwc_avg,
+            "Core GWC (%, variance)": gwc_var,
             "SBD (g/cm^3, average)": sbd_avg,
             "SBD (g/cm^3, variance)": sbd_var
         }])
@@ -642,6 +643,12 @@ def _filter_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
 
     return dfs_filtered
 
+def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """
+    _format_teros12_dfs(dfs) -> dfs_formatted
+    """
+    return dfs
+
 def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
     """
     ingest_teros12_data_from_path(paths) -> df
@@ -657,9 +664,12 @@ def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
     # Filter out invalid datasets.
     dfs_teros12_filtered = _filter_teros12_dfs(dfs=dfs_teros12_grouped)
 
+    # Format each TEROS-12 dataset to match other DFs.
+    dfs_teros12_formatted = _format_teros12_dfs(dfs=dfs_teros12_filtered)
+
     # Merge together all TEROS-12 DataFrames into one (with labels).
     df_teros12 = pd.concat(
-            dfs_teros12_filtered,
+            dfs_teros12_formatted,
             join="inner",
             ignore_index=True
         )
@@ -854,12 +864,14 @@ def load_b1_datasets(path_base: str) -> list[pd.DataFrame]:
 
     return dfs_b1
 
+
 def load_chipotle_datasets(path_base: str) -> pd.DataFrame:
     """
     load_chipotle_datasets(path_base) -> teros12_df
     """
     # TODO: For multimodal models.
     return None
+
 
 def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
     """
@@ -893,6 +905,7 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
             df_cores,
             df_pen,
             df_teros12)
+
 
 def _label_get_sbd_from_date_comp_index(
         df_cores: pd.DataFrame,
@@ -1051,8 +1064,32 @@ def _label_b1_wetness(
     ) -> pd.DataFrame:
     """
     _label_b1_wetness(...) -> df_labeled
+
+    Since our TEROS-12 data are sampled every 10s, dates and times must be
+    matched to align moisture data with each B1 DF.
     """
-    # TODO
+    # Each sensor is placed at 4", 7", and 10" (for valid datasets).
+    ls_vwc_4 = []
+    ls_vwc_7 = []
+    ls_vwc_10 = []
+
+    # Get start/end times of B1 dataset.
+    # NOTE: In the future, B1 data will not be synchronized with TEROS-12 data.
+    #       Alternative methods of alignment will need to be explored.
+    ts = df_b1["time (ms)"].astype(int).values
+    t_start = ts[0]
+
+    vwcs = df_teros12[["timestamp", "VWC"]].values
+    print(vwcs)
+    exit()
+
+    # Iteratively fill in VWC values throughout the the time of data collection:
+    #   + Each additional datapoint is smoothly connected to the following one
+    #       using a variety of methods.
+    #           (currently supported: [linear])
+    for t in ts:
+        pass
+
     return df_b1
 
 def label_dfs_b1(
@@ -1074,8 +1111,6 @@ def label_dfs_b1(
             df_cores=df_cores,
             df_pen=df_pen
         )
-        print(df_labeled)
-        exit()
         
         # Add labels found from the TEROS12 DF to each B1 dataset.
         df_labeled = _label_b1_wetness(
