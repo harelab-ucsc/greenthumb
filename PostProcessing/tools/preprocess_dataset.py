@@ -1006,6 +1006,7 @@ def _label_b1_compaction(
     """
     _label_b1_compaction(...) -> df_labeled
     """
+    # TODO: Get rid of ',' in column headers.
     # Match ground truth soil compaction info to B1 dataset date, compaction
     # level, and soil moisture level.
     l_date = df_b1["Date"].values[0]
@@ -1024,15 +1025,25 @@ def _label_b1_compaction(
             l_date=l_date,
             l_compaction_level=l_compaction_level
         )
-    print(l_spr_3, l_spr_4, l_spr_7)
-    exit()
 
-    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
-    #                       absorbed (just SPR left).
-    # TODO: Get rid of ',' in column headers.
-    print(df_pen.loc[df_pen["Depth (inches)"] == str(3),
-                     ["Date", "Depth (inches)", "SPR (PSI, average)"]])
-    exit()
+    # Merge datasets now that full compaction info is absorbed.
+    df_b1[[
+        "SBD (g/mL-avg-0in)",
+        "SBD (g/mL-avg-4in)",
+        "SBD (g/mL-avg-7in)",
+        "SPR (PSI-avg-3in)",
+        "SPR (PSI-avg-4in)",
+        "SPR (PSI-avg-7in)"
+    ]] = [
+            l_sbd_0,
+            l_sbd_4,
+            l_sbd_7,
+            l_spr_3,
+            l_spr_4,
+            l_spr_7
+        ]
+    
+    return df_b1
 
 def _label_b1_wetness(
         df_b1: pd.DataFrame,
@@ -1063,6 +1074,8 @@ def label_dfs_b1(
             df_cores=df_cores,
             df_pen=df_pen
         )
+        print(df_labeled)
+        exit()
         
         # Add labels found from the TEROS12 DF to each B1 dataset.
         df_labeled = _label_b1_wetness(
