@@ -533,9 +533,9 @@ def _get_teros12_ds_labels_from_path(path: str) -> dict:
             l_depth += 1
 
     return {
-            "depth (inches)": l_depth,
-            "datetime start": l_datetime_start,
-            "sensor index": l_sensor_idx
+            "Depth (inches)": l_depth,
+            "Datetime Start": l_datetime_start,
+            "Sensor Index": l_sensor_idx
         }
 
 def _extract_labeled_teros12_dfs_from_paths(
@@ -578,12 +578,12 @@ def _group_teros12_dfs_by_session(
                         # dataset.
     for df in dfs:
         # Create groups of start timestamps based on their proximity to others.
-        l_start_datetime = df["datetime start"][0]
+        l_start_datetime = df["Datetime Start"][0]
         # It is sufficient to check against the first entry of each group based
         # on threshold.
         grouped = False
         for group in df_groups:
-            group_datetime = group[0]["datetime start"][0]
+            group_datetime = group[0]["Datetime Start"][0]
             if (abs((
                 l_start_datetime - group_datetime
                 ).seconds) <= t_delta_thresh):
@@ -627,11 +627,11 @@ def _filter_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
         # Filter out VWCs outside of the bounds of acceptable by collecting
         # session labels (remove all from that set).
         if (float(df["VWC"].max()) > vwc_max):
-            l_datetime = datetime.strftime(df["datetime start"][0],
+            l_datetime = datetime.strftime(df["Datetime Start"][0],
                                            "%Y%m%d_%H%M%S")
             print(f"Filtering out data from {l_datetime}: > VWC_max...")
         elif (float(df["VWC"].min()) < vwc_min):
-            l_datetime = datetime.strftime(df["datetime start"][0],
+            l_datetime = datetime.strftime(df["Datetime Start"][0],
                                            "%Y%m%d_%H%M%S")
             print(f"Filtering out data from {l_datetime}: < VWC_min...")
         else:
@@ -1104,14 +1104,61 @@ def _label_b1_wetness(
     ls_vwc_7 = []
     ls_vwc_10 = []
 
-    # Get start/end times of B1 dataset.
+    # Get timestamps from B1 dataset.
     # NOTE: In the future, B1 data will not be synchronized with TEROS-12 data.
     #       Alternative methods of alignment will need to be explored.
-    ts = df_b1["Timestamp (Epoch-UTC-ms)"].astype(int).values
-    t_start = ts[0]
-    print(t_start)
+    b1_ts = df_b1["Timestamp (Epoch-UTC-ms)"].astype(float).values
 
-    vwcs = df_teros12[["Timestamp (Epoch-UTC-ms)", "VWC"]].values
+    # Get timestamps paired with VWC and depth label from TEROS-12 dataset.
+    teros12_rows_4 = df_teros12.loc[
+            df_teros12["Depth (inches)"].astype(int) == 4,
+            ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
+
+    teros12_rows_7 = df_teros12.loc[
+            df_teros12["Depth (inches)"].astype(int) == 7,
+            ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
+
+    teros12_rows_10 = df_teros12.loc[
+            df_teros12["Depth (inches)"].astype(int) == 10
+            , ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
+
+    # Find TEROS-12 row right before B1 dataset begins.
+    b1_t_start = b1_ts[0]
+
+    teros12_row_index_4 = 0
+    while float(teros12_rows_4[teros12_row_index_4][0]) <= b1_t_start:
+        teros12_row_index_4 += 1
+    # Go back one row to capture the row right before B1 data collection begins.
+    teros12_row_index_4_prev = teros12_row_index_4 - 1
+
+    teros12_row_index_7 = 0
+    while float(teros12_rows_7[teros12_row_index_7][0]) <= b1_t_start:
+        teros12_row_index_7 += 1
+    # Go back one row to capture the row right before B1 data collection begins.
+    teros12_row_index_7_prev = teros12_row_index_7 - 1
+
+    teros12_row_index_10 = 0
+    while float(teros12_rows_10[teros12_row_index_10][0]) <= b1_t_start:
+        teros12_row_index_10 += 1
+    # Go back one row to capture the row right before B1 data collection begins.
+    teros12_row_index_10_prev = teros12_row_index_10 - 1
+
+
+    print(
+            b1_t_start,
+            teros12_rows_4[teros12_row_index_4_prev],
+            teros12_rows_4[teros12_row_index_4]
+        )
+    print(
+            b1_t_start,
+            teros12_rows_7[teros12_row_index_7_prev],
+            teros12_rows_7[teros12_row_index_7]
+        )
+    print(
+            b1_t_start,
+            teros12_rows_10[teros12_row_index_10_prev],
+            teros12_rows_10[teros12_row_index_10]
+        )
     exit()
 
     # Iteratively fill in VWC values throughout the the time of data collection:
