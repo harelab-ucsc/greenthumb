@@ -946,6 +946,58 @@ def _label_get_sbd_from_date_comp_index(
 
     return (l_sbd_0, l_sbd_4, l_sbd_7)
 
+def _label_get_spr_from_date_comp_index(
+        df_pen: pd.DataFrame,
+        l_date: str,
+        l_compaction_level: int
+    ) -> (float, float, float):
+    """
+    _label_get_spr_from_date_comp_index(...) -> labels
+
+    Extract labels from pen DF; please note:
+      + Only the first entry for each compaction level will be considered
+          (there should be only one average).
+      + VWC index labels are not included in core metadata, so they are not
+          used for references here.
+    """
+    try:
+        l_spr_3 = df_pen.loc[
+                (df_pen["Depth (inches)"].astype(int) == 3) &
+                (df_pen["Date"] == l_date) &
+                (df_pen["Compaction Level (index)"] == l_compaction_level),
+                ["SPR (PSI, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from pen at 0\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_spr_0 = -1
+
+    try:
+        l_spr_4 = df_pen.loc[
+                (df_pen["Depth (inches)"].astype(int) == 4) &
+                (df_pen["Date"] == l_date) &
+                (df_pen["Compaction Level (index)"] == l_compaction_level),
+                ["SPR (PSI, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from pen at 4\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_spr_4 = -1
+
+    try:
+        l_spr_7 = df_pen.loc[
+                (df_pen["Depth (inches)"].astype(int) == 7) &
+                (df_pen["Date"] == l_date) &
+                (df_pen["Compaction Level (index)"] == l_compaction_level),
+                ["SPR (PSI, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from pen at 7\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_spr_7 = -1
+
+    return (l_spr_3, l_spr_4, l_spr_7)
+
 def _label_b1_compaction(
         df_b1: pd.DataFrame,
         df_cores: pd.DataFrame, 
@@ -960,22 +1012,26 @@ def _label_b1_compaction(
     l_compaction_level = df_b1["Compaction Level (index)"].values[0]
     l_swc_level = df_b1["SWC Level (index)"].values[0]
 
-    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
-    #                       absorbed.
-    # TODO: Get rid of ',' in column headers.
     l_sbd_0, l_sbd_4, l_sbd_7 = _label_get_sbd_from_date_comp_index(
             df_cores=df_cores,
             l_date=l_date,
             l_compaction_level=l_compaction_level
         )
-    print(l_sbd_0, l_sbd_4, l_sbd_7)
+
+    # TODO: Consider adding more SPR labels since 0" is basically unuseable.
+    l_spr_3, l_spr_4, l_spr_7 = _label_get_spr_from_date_comp_index(
+            df_pen=df_pen,
+            l_date=l_date,
+            l_compaction_level=l_compaction_level
+        )
+    print(l_spr_3, l_spr_4, l_spr_7)
     exit()
 
-    print(df_cores.loc[df_cores["Depth (inches)"] == 0,
-                       ["Date", "Depth (inches)", "SBD (g/cm^3, average)"]])
+    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
+    #                       absorbed (just SPR left).
+    # TODO: Get rid of ',' in column headers.
     print(df_pen.loc[df_pen["Depth (inches)"] == str(3),
                      ["Date", "Depth (inches)", "SPR (PSI, average)"]])
-    print(df_b1[["Compaction Level (index)", "SWC Level (index)"]])
     exit()
 
 def _label_b1_wetness(
