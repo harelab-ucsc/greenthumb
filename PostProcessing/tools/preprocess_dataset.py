@@ -647,6 +647,24 @@ def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
     """
     _format_teros12_dfs(dfs) -> dfs_formatted
     """
+    # Create a new, empty DF.
+    dfs_reformatted = []
+    df_tmp = pd.DataFrame()
+
+    for df in dfs:
+        # Replace generic "timestamp" label with UTC Epoch label (in ms).
+        df_tmp["Timestamp (Epoch-UTC-ms)"] = (
+            pd.to_datetime(df["timestamp"], format="%Y-%m-%dT%H:%M:%S")
+                .dt.tz_localize("America/Los_Angeles")
+                .dt.tz_convert("UTC")
+                .astype("int64") // 1_000_000
+            )
+
+        df.rename(columns={
+            "timestamp": "Timestamp (Epoch-UTC-ms)"})
+        df["Timestamp (Epoch-UTC-ms)"] = df_tmp["Timestamp (Epoch-UTC-ms)"]
+        dfs_reformatted.append(df)
+
     return dfs
 
 def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
@@ -1079,7 +1097,7 @@ def _label_b1_wetness(
     ts = df_b1["time (ms)"].astype(int).values
     t_start = ts[0]
 
-    vwcs = df_teros12[["timestamp", "VWC"]].values
+    vwcs = df_teros12[["Timestamp (Epoch-UTC-ms)", "VWC"]].values
     print(vwcs)
     exit()
 
