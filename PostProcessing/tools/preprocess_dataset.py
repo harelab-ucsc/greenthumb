@@ -894,6 +894,58 @@ def load_datasets(path_base: str, to_skip: list = []) -> list[dict]:
             df_pen,
             df_teros12)
 
+def _label_get_sbd_from_date_comp_index(
+        df_cores: pd.DataFrame,
+        l_date: str,
+        l_compaction_level: int
+    ) -> (float, float, float):
+    """
+    _label_get_sbd_from_date_comp_index(...) -> labels
+
+    Extract labels from core DF; please note:
+      + Only the first entry for each compaction level will be considered
+          (there should be only one average.
+      + VWC index labels are not included in core metadata, so they are not
+          used for references here.
+    """
+    try:
+        l_sbd_0 = df_cores.loc[
+                (df_cores["Depth (inches)"] == 0) &
+                (df_cores["Date"] == l_date) &
+                (df_cores["Compaction Level (index)"] == str(l_compaction_level)),
+                ["SBD (g/cm^3, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from cores at 0\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_sbd_0 = -1
+
+    try:
+        l_sbd_4 = df_cores.loc[
+                (df_cores["Depth (inches)"] == 4) &
+                (df_cores["Date"] == l_date) &
+                (df_cores["Compaction Level (index)"] == str(l_compaction_level)),
+                ["SBD (g/cm^3, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from cores at 4\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_sbd_4 = -1
+
+    try:
+        l_sbd_7 = df_cores.loc[
+                (df_cores["Depth (inches)"] == 7) &
+                (df_cores["Date"] == l_date) &
+                (df_cores["Compaction Level (index)"] == str(l_compaction_level)),
+                ["SBD (g/cm^3, average)"]
+            ].values[0][0]
+    except IndexError:
+        print(f"WARNING: Cannot find SBD from cores at 7\" for {l_date}, "
+              f"compaction level {l_compaction_level}; marking as -1.")
+        l_sbd_7 = -1
+
+    return (l_sbd_0, l_sbd_4, l_sbd_7)
+
 def _label_b1_compaction(
         df_b1: pd.DataFrame,
         df_cores: pd.DataFrame, 
@@ -908,16 +960,22 @@ def _label_b1_compaction(
     l_compaction_level = df_b1["Compaction Level (index)"].values[0]
     l_swc_level = df_b1["SWC Level (index)"].values[0]
 
-    print(l_date)
-    print(df_cores.loc[df_cores["Date"] == l_date, ["Depth (inches)", "SBD (g/cm^3, average)"]])
+    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
+    #                       absorbed.
+    # TODO: Get rid of ',' in column headers.
+    l_sbd_0, l_sbd_4, l_sbd_7 = _label_get_sbd_from_date_comp_index(
+            df_cores=df_cores,
+            l_date=l_date,
+            l_compaction_level=l_compaction_level
+        )
+    print(l_sbd_0, l_sbd_4, l_sbd_7)
     exit()
+
     print(df_cores.loc[df_cores["Depth (inches)"] == 0,
                        ["Date", "Depth (inches)", "SBD (g/cm^3, average)"]])
     print(df_pen.loc[df_pen["Depth (inches)"] == str(3),
                      ["Date", "Depth (inches)", "SPR (PSI, average)"]])
     print(df_b1[["Compaction Level (index)", "SWC Level (index)"]])
-    # TODO (19 Jun 2026):   Merge datasets now that full compaction info is
-    #                       absorbed.
     exit()
 
 def _label_b1_wetness(
