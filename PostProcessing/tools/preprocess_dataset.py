@@ -647,11 +647,11 @@ def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
     """
     _format_teros12_dfs(dfs) -> dfs_formatted
     """
-    # Create a new, empty DF.
     dfs_reformatted = []
-    df_tmp = pd.DataFrame()
 
     for df in dfs:
+        # Create a new, empty DF.
+        df_tmp = pd.DataFrame()
         # Replace generic "timestamp" label with UTC Epoch label (in ms).
         df_tmp["Timestamp (Epoch-UTC-ms)"] = (
             pd.to_datetime(df["timestamp"], format="%Y-%m-%dT%H:%M:%S")
@@ -660,9 +660,15 @@ def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
                 .astype("int64") // 1_000_000
             )
 
-        df.rename(columns={
-            "timestamp": "Timestamp (Epoch-UTC-ms)"})
+        df.rename(
+                columns={"timestamp": "Timestamp (Epoch-UTC-ms)"},
+                inplace=True
+            )
         df["Timestamp (Epoch-UTC-ms)"] = df_tmp["Timestamp (Epoch-UTC-ms)"]
+        
+        # Drop all 'nan' timestamp rows.
+        df = df.dropna(subset=["Timestamp (Epoch-UTC-ms)"])
+
         dfs_reformatted.append(df)
 
     return dfs
@@ -685,12 +691,13 @@ def extract_teros12_data_from_paths(paths: list[str]) -> pd.DataFrame:
     # Format each TEROS-12 dataset to match other DFs.
     dfs_teros12_formatted = _format_teros12_dfs(dfs=dfs_teros12_filtered)
 
-    # Merge together all TEROS-12 DataFrames into one (with labels).
+    # Merge together all TEROS-12 DataFrames into one (with labels), sorted
+    # by timestamp.
     df_teros12 = pd.concat(
             dfs_teros12_formatted,
             join="inner",
             ignore_index=True
-        )
+        ).sort_values(by="Timestamp (Epoch-UTC-ms)")
 
     return df_teros12
 
@@ -836,6 +843,12 @@ def _extract_labeled_b1_dfs_from_paths(paths: list[str]) -> list[pd.DataFrame]:
         # Trim both empty data columns (in the case of early test data) and
         # long sequences of nothing (as in the beginning).
         df = scrub_b1_df(df)
+
+        # Rename the timestamps column with something more descriptive.
+        df.rename(
+                columns={"time (ms)": "Timestamp (Epoch-UTC-ms)"},
+                inplace=True
+            )
 
         # Label each DataFrame.
         for label in ds_labels_dict.keys():
@@ -1094,11 +1107,11 @@ def _label_b1_wetness(
     # Get start/end times of B1 dataset.
     # NOTE: In the future, B1 data will not be synchronized with TEROS-12 data.
     #       Alternative methods of alignment will need to be explored.
-    ts = df_b1["time (ms)"].astype(int).values
+    ts = df_b1["Timestamp (Epoch-UTC-ms)"].astype(int).values
     t_start = ts[0]
+    print(t_start)
 
     vwcs = df_teros12[["Timestamp (Epoch-UTC-ms)", "VWC"]].values
-    print(vwcs)
     exit()
 
     # Iteratively fill in VWC values throughout the the time of data collection:
