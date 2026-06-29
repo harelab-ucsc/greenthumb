@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    19 Jun 2026
+    29 Jun 2026
 
 Version:
-    1.0.6
+    1.0.9
 """
 import argparse
 import copy as cp
@@ -23,6 +23,11 @@ import re
 
 from datetime import datetime, timedelta
 from io import StringIO
+
+
+# Useful macros.
+_RECURSION_MAX = 5
+_T_TEROS12_DIFF_MAX = 5 * 60 * 1000
 
 
 # TODO: Add "eval_id" to output dataset.
@@ -669,6 +674,9 @@ def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
         # Drop all 'nan' timestamp rows.
         df = df.dropna(subset=["Timestamp (Epoch-UTC-ms)"])
 
+        # Next, reformat VWCs to be floats.
+        df["VWC"] = df["VWC"].astype(float)
+
         dfs_reformatted.append(df)
 
     return dfs
@@ -1089,6 +1097,137 @@ def _label_b1_compaction(
     
     return df_b1
 
+def _get_teros12_start_index_from_t_start(
+        depth: int,
+        rows: tuple[float, float],
+        t_start: float
+    ) -> (int, list):
+    """
+    _label_b1_wetness_get_rows_by_depth_and_t_start(...) -> index
+    """
+    idx_t12 = 0
+
+    # Iterate through until we reach the start index (do not go past).
+    while float(rows[idx_t12][0]) <= t_start:
+        idx_t12 += 1
+
+    return idx_t12 - 1
+
+def _get_prev_index(t_ref: float, t_list: list[float]) -> int:
+    """
+    _get_prev_index(t_ref, t_list) -> idx_start
+
+    Find the index of the timestamp directly before a given timestamp.
+    Assumes that t_list is sorted.
+    """
+    for i, t in enumerate(t_list):
+        if t <= t_ref:
+            return i
+
+def _get_t_vwc_rows_teros12_from_df(
+        df: pd.DataFrame,
+        depth: int
+    ) -> list[float, float]:
+    """
+    _get_t_vwc_rows_teros12_from_df(df, depth) -> list[t, vwc]
+    """
+    # Get timestamps paired with VWC and depth label from TEROS-12 dataset.
+    rows = df.loc[df["Depth (inches)"].astype(int) == depth,
+                  ["Timestamp (Epoch-UTC-ms)", "VWC"]
+              ].values
+    return rows
+
+def _label_b1_wetness_get_t12_idx(
+        idx: int,
+        rows: tuple[float, float],
+        t: float,
+        rec_n: int = 0
+    ) -> int:
+    """
+    _label_b1_wetness_get_t12_idx(...) -> idx_prev, idx_next
+
+    Recursive function for finding the current interval in which 
+    """
+    assert (rec_n < _RECURSION_MAX), (f"ERROR: Beyond max recursion!")
+
+    t_prev = rows[idx][0]
+    t_next = rows[idx+1][0]
+
+    assert (t_next - t_prev < _T_TEROS12_DIFF_MAX), (
+            f"ERROR: TEROS-12 data jumps from {t_prev} to {t_next}!")
+    assert(t_next > t_prev), (
+            f"ERROR: Something is up with TEROS-12 data at {idx}:\n",
+            f"\t{t_prev} -> {t_next}")
+
+    if (t >= t_prev) and (t < t_next):
+        # Hit the right interval.
+        return idx
+    elif (t < t_prev):
+        # Go backwards here.
+        return _label_b1_wetness_get_t12_idx(
+            idx=idx-1,
+            rows=rows,
+            t=t,
+            rec_n=rec_n+1
+        )
+    elif (t >= t_next):
+        # Go forwards here.
+        return _label_b1_wetness_get_t12_idx(
+            idx=idx+1,
+            rows=rows,
+            t=t,
+            rec_n=rec_n+1
+        )
+
+def _label_b1_wetness_get_teros12_labels(
+        depth: int,
+        df_b1: pd.DataFrame,
+        df_teros12: pd.DataFrame,
+        t_b1: tuple[float]
+    ) -> pd.DataFrame:
+    """
+    _label_b1_wetness_get_teros12_labels(...) -> df
+
+    Assume B1 timestamps are sorted properly.
+    """
+    # Get pairs of t and VWC.
+    rows_t12 = _get_t_vwc_rows_teros12_from_df(df=df_teros12, depth=depth)
+
+    # Find the starting TEROS-12 timestamp index to save on time.
+    idx_t12 = _get_teros12_start_index_from_t_start(
+            depth=depth,
+            rows=rows_t12,
+            t_start=t_b1[0]
+        )
+
+    # Iteratively fill in VWC values throughout the the time of data collection:
+    #   + Each additional datapoint is smoothly connected to the following one
+    #       using a variety of methods.
+    #           (currently supported: [linear])
+
+    for t in t_b1:
+        # NOTE: Need to constrain against long jumps in TEROS-12 time.
+        # Start by locating previous/next TEROS-12 rows.
+        idx_t12 = _label_b1_wetness_get_t12_idx(
+                idx=idx_t12,
+                rows=rows_t12,
+                t=t
+            )
+
+        # Unzip TEROS-12 rows for math.
+        [t_t12_prev, vwc_prev] = [float(i) for i in rows_t12[idx_t12]]
+        [t_t12_next, vwc_next] = [float(i) for i in rows_t12[idx_t12+1]]
+        
+        # Said math.
+        m = (vwc_next - vwc_prev) / (t_t12_next - t_t12_prev)        
+        vwc_now_est = vwc_prev + m * (t - t_t12_prev)
+
+        # Add estimated VWC with t to the new DF.
+        df_b1.loc[df_b1["Timestamp (Epoch-UTC-ms)"]  == t,
+                  f"Est VWC (%-{depth}in)"] = vwc_now_est
+
+    return df_b1
+
 def _label_b1_wetness(
         df_b1: pd.DataFrame,
         df_teros12: pd.DataFrame
@@ -1099,74 +1238,40 @@ def _label_b1_wetness(
     Since our TEROS-12 data are sampled every 10s, dates and times must be
     matched to align moisture data with each B1 DF.
     """
-    # Each sensor is placed at 4", 7", and 10" (for valid datasets).
-    ls_vwc_4 = []
-    ls_vwc_7 = []
-    ls_vwc_10 = []
-
     # Get timestamps from B1 dataset.
     # NOTE: In the future, B1 data will not be synchronized with TEROS-12 data.
     #       Alternative methods of alignment will need to be explored.
-    b1_ts = df_b1["Timestamp (Epoch-UTC-ms)"].astype(float).values
+    t_b1 = sorted(df_b1["Timestamp (Epoch-UTC-ms)"].astype(float).values)
 
-    # Get timestamps paired with VWC and depth label from TEROS-12 dataset.
-    teros12_rows_4 = df_teros12.loc[
-            df_teros12["Depth (inches)"].astype(int) == 4,
-            ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
+    # Get TEROS-12 data for alignment with B1 DF.
+    try:
+        df_b1 = _label_b1_wetness_get_teros12_labels(
+                depth=4,
+                df_b1=df_b1,
+                df_teros12=df_teros12,
+                t_b1=t_b1
+            )
+        df_b1 = _label_b1_wetness_get_teros12_labels(
+                depth=7,
+                df_b1=df_b1,
+                df_teros12=df_teros12,
+                t_b1=t_b1
+            )
+        df_b1 = _label_b1_wetness_get_teros12_labels(
+                depth=10,
+                df_b1=df_b1,
+                df_teros12=df_teros12,
+                t_b1=t_b1
+            )
 
-    teros12_rows_7 = df_teros12.loc[
-            df_teros12["Depth (inches)"].astype(int) == 7,
-            ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
-
-    teros12_rows_10 = df_teros12.loc[
-            df_teros12["Depth (inches)"].astype(int) == 10
-            , ["Timestamp (Epoch-UTC-ms)", "VWC"]].values
-
-    # Find TEROS-12 row right before B1 dataset begins.
-    b1_t_start = b1_ts[0]
-
-    teros12_row_index_4 = 0
-    while float(teros12_rows_4[teros12_row_index_4][0]) <= b1_t_start:
-        teros12_row_index_4 += 1
-    # Go back one row to capture the row right before B1 data collection begins.
-    teros12_row_index_4_prev = teros12_row_index_4 - 1
-
-    teros12_row_index_7 = 0
-    while float(teros12_rows_7[teros12_row_index_7][0]) <= b1_t_start:
-        teros12_row_index_7 += 1
-    # Go back one row to capture the row right before B1 data collection begins.
-    teros12_row_index_7_prev = teros12_row_index_7 - 1
-
-    teros12_row_index_10 = 0
-    while float(teros12_rows_10[teros12_row_index_10][0]) <= b1_t_start:
-        teros12_row_index_10 += 1
-    # Go back one row to capture the row right before B1 data collection begins.
-    teros12_row_index_10_prev = teros12_row_index_10 - 1
-
-
-    print(
-            b1_t_start,
-            teros12_rows_4[teros12_row_index_4_prev],
-            teros12_rows_4[teros12_row_index_4]
-        )
-    print(
-            b1_t_start,
-            teros12_rows_7[teros12_row_index_7_prev],
-            teros12_rows_7[teros12_row_index_7]
-        )
-    print(
-            b1_t_start,
-            teros12_rows_10[teros12_row_index_10_prev],
-            teros12_rows_10[teros12_row_index_10]
-        )
-    exit()
-
-    # Iteratively fill in VWC values throughout the the time of data collection:
-    #   + Each additional datapoint is smoothly connected to the following one
-    #       using a variety of methods.
-    #           (currently supported: [linear])
-    for t in ts:
-        pass
+    except AssertionError as e:
+        print(e)
+        print(f"B1 time start:\t{t_b1[0]};\n"
+              f"B1 time end:\t{t_b1[-1]};\n")
+        print(df_teros12)
+        exit()
+    
+    print(df_b1)
 
     return df_b1
 
