@@ -7,10 +7,10 @@ Author:
     nubby
 
 Date:
-    29 Jun 2026
+    30 Jun 2026
 
 Version:
-    1.0.9
+    1.0.10
 """
 import argparse
 import copy as cp
@@ -26,8 +26,8 @@ from io import StringIO
 
 
 # Useful macros.
-_RECURSION_MAX = 5
-_T_TEROS12_DIFF_MAX = 5 * 60 * 1000
+_RECURSION_MAX = 5                          # Number of recursions deep.
+_T_TEROS12_DIFF_MAX = 2 * 60 * 60 * 1000    # 2 hours.
 
 
 # TODO: Add "eval_id" to output dataset.
@@ -1110,6 +1110,9 @@ def _get_teros12_start_index_from_t_start(
     # Iterate through until we reach the start index (do not go past).
     while float(rows[idx_t12][0]) <= t_start:
         idx_t12 += 1
+        if (idx_t12 >= len(rows)):
+            # Raise an index error if start time is beyond all measurments.
+            raise IndexError
 
     return idx_t12 - 1
 
@@ -1153,8 +1156,28 @@ def _label_b1_wetness_get_t12_idx(
     t_prev = rows[idx][0]
     t_next = rows[idx+1][0]
 
-    assert (t_next - t_prev < _T_TEROS12_DIFF_MAX), (
-            f"ERROR: TEROS-12 data jumps from {t_prev} to {t_next}!")
+    if (t_next - t_prev >= _T_TEROS12_DIFF_MAX):
+        # If TEROS-12 streaming began after a run began on a day, print a
+        # warning and use the first datapoint of the day until we catch up.
+        day_1 = pd.to_datetime(
+                int(t_prev), unit="ms", utc=True
+            ).tz_convert("America/Los_Angeles").date()
+        day_2 = pd.to_datetime(
+                int(t_next), unit="ms", utc=True
+            ).tz_convert("America/Los_Angeles").date()
+        if (day_1 != day_2):
+            # On differing days, increment the index and use timestamps from
+            # that day.
+            # TODO: Test that this doesn't produce some wild artifacts from
+            #       linear fitting.
+            print(f"WARNING: TEROS-12 data jumps {day_1} to {day_2}; using "
+                  f"first datapoint from {day_2}.")
+            return idx+1
+        else:
+            # If within the same day, print a warning.
+            print(f"WARNING: TEROS-12 data jumps from {t_prev} "
+                  f"(VWC: {rows[idx][1]}) to {t_next} (VWC: {rows[idx+1][1]}).")
+
     assert(t_next > t_prev), (
             f"ERROR: Something is up with TEROS-12 data at {idx}:\n",
             f"\t{t_prev} -> {t_next}")
@@ -1194,11 +1217,16 @@ def _label_b1_wetness_get_teros12_labels(
     rows_t12 = _get_t_vwc_rows_teros12_from_df(df=df_teros12, depth=depth)
 
     # Find the starting TEROS-12 timestamp index to save on time.
-    idx_t12 = _get_teros12_start_index_from_t_start(
-            depth=depth,
-            rows=rows_t12,
-            t_start=t_b1[0]
-        )
+    try:
+        idx_t12 = _get_teros12_start_index_from_t_start(
+                depth=depth,
+                rows=rows_t12,
+                t_start=t_b1[0]
+            )
+    except IndexError as e:
+        print(f"WARNING: Missing TEROS-12 data ({depth}in) for B1 runs at "
+              f"{t_b1[0]}! Skipping...")
+        return df_b1
 
     # Iteratively fill in VWC values throughout the the time of data collection:
     #   + Each additional datapoint is smoothly connected to the following one
