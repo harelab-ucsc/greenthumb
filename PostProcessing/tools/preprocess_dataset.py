@@ -82,6 +82,25 @@ def _write_dataset(dataset: pd.DataFrame, path: str):
     dataset.to_csv(path, index=False)
     print(f"SUCCESS:\tWrote {path}!")
 
+def _get_b1_df_label(df: pd.DataFrame) -> str:
+    """
+    _get_b1_df_label(df) -> label
+
+    Form a dataset label using the start time, trial label, compaction level,
+    and wetness level.
+    """
+    t_start = df["Timestamp (Epoch-UTC-ms)"].values[0]
+    label_b1 = df["Dataset Label"].values[0]
+    idx_comp = df["Compaction Level (index)"].values[0]
+    idx_wet = df["SWC Level (index)"].values[0]
+
+    return "-".join([
+        t_start,
+        label_b1,
+        "c"+idx_comp,
+        "w"+idx_wet
+    ])
+
 def _load_dataset_info(
         info: dict,
         base_path: str,
@@ -1351,7 +1370,11 @@ def _write_labeled_df(df: pd.DataFrame, path_base: str):
 
     Write preprocessed output to a programmatically-generated path.
     """
-    pass
+    label_df = _get_b1_df_label(df=df)
+    path_out = ("/").join([path_base, label_df+".csv"])
+    print(f"STATUS: Writing {label_df} to {path_out}...")
+    _write_dataset(dataset=df, path=label_df)
+    print("SUCCESS: DONE.")
 
 def preprocess_dataset(
         path_input_dir: str,
@@ -1413,50 +1436,11 @@ def preprocess_dataset(
         df_pen=df_pen,
         df_teros12=df_teros12)
 
-    exit()
     # Write fully-processed, labeled datasets to files for further processing/
     # learning/training.
     for df in dfs_b1_out:
-        _write_labeled_df(df)
-    """
-    info = _load_dataset(base_path=base, file_names=files)
-    # Only append info if it corresponds to a directory containing all 
-    # required datasets.
-    try:
-        if not info["dataset"]["combined"].empty:
-            print(f"Adding {info['label']}!")
-            verbose_datasets.append(info)
-    except AttributeError:
-        pass
-    """
+        _write_labeled_df(df, path_base=path_output_dir)
 
-    # Filter out invalid datasets.
-
-    # Merge all TEROS-12 data into one DataFrame.
-    """
-    teros12_df = pd.concat(
-            [teros12_df, new_entry],
-            join="inner",
-            ignore_index=True
-        )
-    """
-    assert (
-        any(
-            [len(info) > 0 for info in verbose_datasets]
-        )
-    ), "ERROR: No input CSV files found!"
-
-    # Output properly formatted dataset as described above.
-    [_write_dataset(
-        dataset=info["dataset"]["combined"],
-        path=os.path.join(
-            path_output_dir,
-            info["label"],
-            info["timestamp"],
-            "combined.csv"
-        )
-     ) for info in verbose_datasets]
-    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
