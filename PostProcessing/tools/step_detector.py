@@ -159,7 +159,7 @@ def extract_steps_from_df(df: pd.DataFrame) -> list[pd.DataFrame]:
             "RRKneeT (Nm)",
             "IMUAccz"
         ]
-    plot_data_columns(df=df, cols=cols, n=5000, start_index=100000)
+    plot_data_columns(df=df, cols=cols, n=1000, start_index=10000)
 
 def _read_csv(path: str) -> pd.DataFrame:
     """

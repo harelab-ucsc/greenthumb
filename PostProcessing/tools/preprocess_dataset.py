@@ -10,7 +10,7 @@ Date:
     30 Jun 2026
 
 Version:
-    1.0.10
+    1.1.0
 """
 import argparse
 import copy as cp
@@ -75,8 +75,12 @@ def _read_csv(path: str, ds_type: str = "") -> pd.DataFrame:
 
 def _write_dataset(dataset: pd.DataFrame, path: str):
     # First create any required parent directories.
+    # TODO: Make this create a directory by default.
+    """
     pdir = os.path.dirname(path)
+    print(pdir)
     os.makedirs(pdir, exist_ok=True)
+    """
 
     # Write it!
     dataset.to_csv(path, index=False)
@@ -89,10 +93,10 @@ def _get_b1_df_label(df: pd.DataFrame) -> str:
     Form a dataset label using the start time, trial label, compaction level,
     and wetness level.
     """
-    t_start = df["Timestamp (Epoch-UTC-ms)"].values[0]
+    t_start = str(df["Timestamp (Epoch-UTC-ms)"].astype(str).values[0])
     label_b1 = df["Dataset Label"].values[0]
-    idx_comp = df["Compaction Level (index)"].values[0]
-    idx_wet = df["SWC Level (index)"].values[0]
+    idx_comp = str(df["Compaction Level (index)"].astype(str).values[0])
+    idx_wet = str(df["SWC Level (index)"].astype(str).values[0])
 
     return "-".join([
         t_start,
@@ -1373,7 +1377,7 @@ def _write_labeled_df(df: pd.DataFrame, path_base: str):
     label_df = _get_b1_df_label(df=df)
     path_out = ("/").join([path_base, label_df+".csv"])
     print(f"STATUS: Writing {label_df} to {path_out}...")
-    _write_dataset(dataset=df, path=label_df)
+    _write_dataset(dataset=df, path=path_out)
     print("SUCCESS: DONE.")
 
 def preprocess_dataset(

@@ -2,19 +2,20 @@
 benchmark.py
 
 Author:
-    Taylor Kergan
     nubby
+    Taylor Kergan
 
 Date:
-    11 Dec 2025
+    30 Jun 2026
 
 Version:
-    1.0.0
+    1.0.1
 """
 from __future__ import annotations
 
 import argparse
 import copy
+import logging
 import random
 import json
 from dataclasses import dataclass, field
@@ -348,116 +349,73 @@ def save_plots(history: TrainingHistory, output_dir: Path, model_name: str) -> N
             fig.savefig(model_dir / f"{model_name}_train_batch_loss.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Benchmark sequence models on DyRET terrain dataset."
-    )
-    parser.add_argument(
-        "--data-dir", type=Path, default=Path("data"), help="Path to the data directory."
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=30, help="Maximum number of training epochs.")
-    parser.add_argument("--batch-size", type=int, default=32, help="Mini-batch size.")
-    parser.add_argument("--lr", type=float, default=3e-4, help="Initial learning rate.")
-    parser.add_argument("--weight-decay", type=float, default=1e-3, help="Weight decay for AdamW.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-    parser.add_argument("--patience", type=int, default=6, help="Early stopping patience.")
-    parser.add_argument(
-        "--models",
-        nargs="+",
-        default=["lstm", "tcn", "transformer"],
-        help="Subset of models to train (choices: lstm, tcn, transformer).",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("artifacts"),
-        help="Directory to store plots and training histories.",
-    )
-    parser.add_argument(
-        "--window-size",
-        type=int,
-        default=None,
-        help="Optional sliding window size (timesteps) applied within each gait step.",
-    )
-    parser.add_argument(
-        "--stride",
-        type=int,
-        default=None,
-        help="Stride (timesteps) between sliding windows; defaults to window size for non-overlapping segments.",
-    )
-    parser.add_argument(
-        "--use-wandb",
-        action="store_true",
-        help="Enable Weights & Biases logging.",
-    )
-    parser.add_argument(
-        "--wandb-project",
-        type=str,
-        default="dyret-terrain",
-        help="Weights & Biases project name.",
-    )
-    parser.add_argument(
-        "--wandb-entity",
-        type=str,
-        default=None,
-        help="Weights & Biases entity (team or username).",
-    )
-    parser.add_argument(
-        "--wandb-group",
-        type=str,
-        default=None,
-        help="Optional Weights & Biases group label for the runs.",
-    )
-    parser.add_argument(
-        "--wandb-run-prefix",
-        type=str,
-        default="terrain",
-        help="Prefix for generated Weights & Biases run names.",
-    )
-    parser.add_argument(
-        "--wandb-mode",
-        type=str,
-        choices=["online", "offline", "disabled"],
-        default="online",
-        help="Weights & Biases mode (use 'offline' when working without network).",
-    )
-    parser.add_argument("--no-cuda", action="store_true", help="Force CPU execution even if CUDA is available.")
-    args = parser.parse_args()
-
-    if args.stride is not None and args.window_size is None:
-        parser.error("--stride requires --window-size.")
-    if args.window_size is not None and args.window_size <= 0:
-        parser.error("--window-size must be a positive integer.")
-    if args.stride is not None and args.stride <= 0:
-        parser.error("--stride must be a positive integer.")
-    if args.use_wandb and args.wandb_mode == "disabled":
-        parser.error("--use-wandb cannot be combined with --wandb-mode disabled.")
-
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+def set_up(
+        no_cuda: bool,
+        output_dir: Path,
+        seed: int,
+        ) -> torch.device:
+    # Select device for training.
+    device = torch.device(
+            "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+        )
     print(f"Using device: {device}")
-    set_seed(args.seed)
 
-    output_dir: Path = args.output_dir
+    # Set random seed.
+    set_seed(seed)
+
+    # Set up output directory.
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    return device
+
+def benchmark(
+        batch_size: int,
+        data_dir: Path,
+        epochs: int,
+        lr: float,
+        models: list[str],
+        no_cuda: bool,
+        output_dir: Path,
+        patience: float,
+        seed: int,
+        stride: int,
+        use_wandb: bool,
+        wandb_entity: str,
+        wandb_group: str,
+        wandb_mode: str,
+        wandb_project: str,
+        wandb_run_prefix: str,
+        weight_decay: float,
+        window_size: int,
+    ):
+    """
+    benchmark(...)
+
+    Main training pipeline entry point.
+    """
+    device = set_up(
+            no_cuda=no_cuda,
+            output_dir=output_dir,
+            seed=seed,
+        )
+
+    # Create data bundle for training/evals.
     data_bundle = build_data_bundle(
-        args.data_dir,
-        seed=args.seed,
-        window_size=args.window_size,
-        stride=args.stride,
-        mode="qcat"   # NOTE: b1,qcat
+        data_dir,
+        seed=seed,
+        window_size=window_size,
+        stride=stride,
+        mode="b1"   # NOTE: b1,qcat
     )
     input_dim = len(data_bundle.feature_names)
     num_classes = 3
 
     config = TrainingConfig(
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        patience=args.patience,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        weight_decay=weight_decay,
+        patience=patience,
     )
 
     available_models = {
@@ -466,18 +424,18 @@ def main() -> None:
         "transformer": TransformerClassifier(input_dim=input_dim, num_classes=num_classes),
     }
 
-    unknown = set(args.models) - set(available_models.keys())
+    unknown = set(models) - set(available_models.keys())
     if unknown:
         raise ValueError(f"Unknown model names requested: {', '.join(sorted(unknown))}")
-    models = {name: available_models[name] for name in args.models}
+    models = {name: available_models[name] for name in models}
 
     dataset_summary = {
         "train_samples": len(data_bundle.train),
         "val_samples": len(data_bundle.val),
         "test_samples": len(data_bundle.test),
         "feature_dim": input_dim,
-        "window_size": args.window_size,
-        "stride": args.stride,
+        "window_size": window_size,
+        "stride": stride,
     }
 
     print(
@@ -501,29 +459,29 @@ def main() -> None:
         model.to(device)
 
         wandb_run = None
-        if args.use_wandb and args.wandb_mode != "disabled":
+        if use_wandb and wandb_mode != "disabled":
             if wandb is None:
                 raise RuntimeError(
                     "Weights & Biases is not installed. Install it with 'pip install wandb' to enable logging."
                 )
-            run_name = f"{args.wandb_run_prefix}-{name}-seed{args.seed}"
+            run_name = f"{wandb_run_prefix}-{name}-seed{seed}"
             run_config = {
                 **dataset_summary,
-                "epochs": args.epochs,
-                "batch_size": args.batch_size,
-                "lr": args.lr,
-                "weight_decay": args.weight_decay,
-                "patience": args.patience,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "weight_decay": weight_decay,
+                "patience": patience,
                 "model": name,
                 "params": param_count,
             }
             wandb_run = wandb.init(  # type: ignore[call-arg]
-                project=args.wandb_project,
-                entity=args.wandb_entity,
-                group=args.wandb_group,
+                project=wandb_project,
+                entity=wandb_entity,
+                group=wandb_group,
                 name=run_name,
                 config=run_config,
-                mode=args.wandb_mode,
+                mode=wandb_mode,
                 reinit=True,
             )
 
@@ -559,4 +517,147 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Arg parsing.
+    parser = argparse.ArgumentParser(
+            description="Benchmark sequence models on DyRET terrain dataset."
+        )
+    parser.add_argument(
+            "--data-dir",
+            type=Path,
+            default=Path("data"),
+            help="Path to the data directory."
+        )
+    parser.add_argument(
+            "--epochs",
+            type=int,
+            default=30,
+            help="Maximum number of training epochs."
+        )
+    parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=32,
+            help="Mini-batch size."
+        )
+    parser.add_argument(
+            "--lr",
+            type=float,
+            default=3e-4,
+            help="Initial learning rate."
+        )
+    parser.add_argument(
+            "--weight-decay",
+            type=float,
+            default=1e-3,
+            help="Weight decay for AdamW."
+        )
+    parser.add_argument(
+            "--seed",
+            type=int,
+            default=42,
+            help="Random seed."
+        )
+    parser.add_argument(
+            "--patience",
+            type=int,
+            default=6,
+            help="Early stopping patience."
+        )
+    parser.add_argument(
+            "--models",
+            nargs="+",
+            default=["lstm", "tcn", "transformer"],
+            help="Subset of models to train (choices: lstm, tcn, transformer).",
+        )
+    parser.add_argument(
+            "--output-dir",
+            type=Path,
+            default=Path("artifacts"),
+            help="Directory to store plots and training histories.",
+        )
+    parser.add_argument(
+            "--window-size",
+            type=int,
+            default=None,
+            help="Optional sliding window size (timesteps) applied within each gait step.",
+        )
+    parser.add_argument(
+            "--stride",
+            type=int,
+            default=None,
+            help="Stride (timesteps) between sliding windows; defaults to window size for non-overlapping segments.",
+        )
+    parser.add_argument(
+            "--use-wandb",
+            action="store_true",
+            help="Enable Weights & Biases logging.",
+        )
+    parser.add_argument(
+            "--wandb-project",
+            type=str,
+            default="dyret-terrain",
+            help="Weights & Biases project name.",
+        )
+    parser.add_argument(
+            "--wandb-entity",
+            type=str,
+            default=None,
+            help="Weights & Biases entity (team or username).",
+        )
+    parser.add_argument(
+            "--wandb-group",
+            type=str,
+            default=None,
+            help="Optional Weights & Biases group label for the runs.",
+        )
+    parser.add_argument(
+            "--wandb-run-prefix",
+            type=str,
+            default="terrain",
+            help="Prefix for generated Weights & Biases run names.",
+        )
+    parser.add_argument(
+            "--wandb-mode",
+            type=str,
+            choices=["online", "offline", "disabled"],
+            default="online",
+            help=("Weights & Biases mode (use 'offline' when working without "
+                  "network)."),
+        )
+    parser.add_argument(
+            "--no-cuda",
+            action="store_true",
+            help="Force CPU execution even if CUDA is available."
+        )
+    args = parser.parse_args()
+
+    if args.stride is not None and args.window_size is None:
+        parser.error("--stride requires --window-size.")
+    if args.window_size is not None and args.window_size <= 0:
+        parser.error("--window-size must be a positive integer.")
+    if args.stride is not None and args.stride <= 0:
+        parser.error("--stride must be a positive integer.")
+    if args.use_wandb and args.wandb_mode == "disabled":
+        parser.error("--use-wandb cannot be combined with --wandb-mode "
+                     "disabled.")
+
+    benchmark(
+            batch_size=args.batch_size,
+            data_dir=args.data_dir,
+            epochs=args.epochs,
+            lr=args.lr,
+            models=args.models,
+            no_cuda=args.no_cuda
+            output_dir=args.output_dir,
+            patience=args.patience,
+            seed=args.seed,
+            stride=args.stride,
+            use_wandb=args.use_wandb,
+            wandb_entity=args.wandb_entity,
+            wandb_group=args.wandb_group,
+            wandb_mode=args.wandb_mode,
+            wandb_project=args.wandb_project,
+            wandb_run_prefix=args.wandb_run_prefix,
+            weight_decay=args.weight_decay,
+            window_size=args.window_size,
+        )

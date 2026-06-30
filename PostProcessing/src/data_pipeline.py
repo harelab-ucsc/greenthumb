@@ -645,7 +645,7 @@ def build_data_bundle(
     Data/Features used in training are selectable with the "mode" flag:
         + mode: "qcat"      <- Open-source dataset only.
         + mode: "b1"        <- Dataset collected from our B1 robot.
-        + mode: "combined"  <- Combined dataset.
+        + mode: "combined"  <- [WIP] Combined dataset.
     """
     # Start by loading the selected datasets.
     raw = load_raw_dataset(

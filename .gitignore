@@ -11,3 +11,4 @@ Sensing/teros12/scripts/output/
 Sensing/b1/data/
 Sensing/radar/data/
 Data/*
+PostProcessing/processed/*
