@@ -621,7 +621,7 @@ def _filter_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
         + More?
     """
     # Filter criteria.
-    vwc_max = 0.21
+    vwc_max = 0.30
     vwc_min = 0.04
 
     dfs_filtered = []
@@ -664,7 +664,6 @@ def _format_teros12_dfs(dfs: list[pd.DataFrame]) -> list[pd.DataFrame]:
                 .dt.tz_convert("UTC")
                 .astype("int64") // 1_000_000
             )
-
         df.rename(
                 columns={"timestamp": "Timestamp (Epoch-UTC-ms)"},
                 inplace=True
@@ -1112,6 +1111,10 @@ def _get_teros12_start_index_from_t_start(
         idx_t12 += 1
         if (idx_t12 >= len(rows)):
             # Raise an index error if start time is beyond all measurments.
+            print(idx_t12)
+            print(t_start)
+            print(rows[-1])
+            print(len(rows))
             raise IndexError
 
     return idx_t12 - 1
@@ -1138,6 +1141,7 @@ def _get_t_vwc_rows_teros12_from_df(
     rows = df.loc[df["Depth (inches)"].astype(int) == depth,
                   ["Timestamp (Epoch-UTC-ms)", "VWC"]
               ].values
+
     return rows
 
 def _label_b1_wetness_get_t12_idx(
@@ -1224,6 +1228,7 @@ def _label_b1_wetness_get_teros12_labels(
                 t_start=t_b1[0]
             )
     except IndexError as e:
+        print(rows_t12[-1])
         print(f"WARNING: Missing TEROS-12 data ({depth}in) for B1 runs at "
               f"{t_b1[0]}! Skipping...")
         return df_b1
@@ -1241,10 +1246,11 @@ def _label_b1_wetness_get_teros12_labels(
                 rows=rows_t12,
                 t=t
             )
+
         if day_jump:
             # If data jumps a day, use the next TEROS-12 datapoint until we
             # catch up.
-            vwc_now_est = rows_t12[idx_t12+1]
+            vwc_now_est = rows_t12[idx_t12+1][1]
         else:
             # If all is as it should be, linearly interpolate:
             # Unzip TEROS-12 rows for math.
@@ -1255,9 +1261,9 @@ def _label_b1_wetness_get_teros12_labels(
             m = (vwc_next - vwc_prev) / (t_t12_next - t_t12_prev)        
             vwc_now_est = vwc_prev + m * (t - t_t12_prev)
 
-            # Add estimated VWC with t to the new DF.
-            df_b1.loc[df_b1["Timestamp (Epoch-UTC-ms)"]  == t,
-                      f"Est VWC (%-{depth}in)"] = vwc_now_est
+        # Add estimated VWC with t.
+        df_b1.loc[df_b1["Timestamp (Epoch-UTC-ms)"]  == t,
+                  f"Est VWC (%-{depth}in)"] = vwc_now_est
 
     return df_b1
 
@@ -1304,8 +1310,6 @@ def _label_b1_wetness(
         print(df_teros12)
         exit()
     
-    print(df_b1)
-
     return df_b1
 
 def label_dfs_b1(
@@ -1336,7 +1340,18 @@ def label_dfs_b1(
 
         dfs_b1_labeled.append(df_labeled)
 
+    print(f"SUCCESS: Labeled {len(dfs_b1_labeled)} B1 datasets!")
+
     return dfs_b1_labeled 
+
+
+def _write_labeled_df(df: pd.DataFrame, path_base: str):
+    """
+    _write_labeled_df(df)
+
+    Write preprocessed output to a programmatically-generated path.
+    """
+    pass
 
 def preprocess_dataset(
         path_input_dir: str,
@@ -1401,6 +1416,8 @@ def preprocess_dataset(
     exit()
     # Write fully-processed, labeled datasets to files for further processing/
     # learning/training.
+    for df in dfs_b1_out:
+        _write_labeled_df(df)
     """
     info = _load_dataset(base_path=base, file_names=files)
     # Only append info if it corresponds to a directory containing all 
