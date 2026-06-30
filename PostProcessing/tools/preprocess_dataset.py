@@ -1145,11 +1145,11 @@ def _label_b1_wetness_get_t12_idx(
         rows: tuple[float, float],
         t: float,
         rec_n: int = 0
-    ) -> int:
+    ) -> tuple[int, bool]:
     """
-    _label_b1_wetness_get_t12_idx(...) -> idx_prev, idx_next
+    _label_b1_wetness_get_t12_idx(...) -> (idx_t12, day_jump?) 
 
-    Recursive function for finding the current interval in which 
+    Recursive function for finding the current interval in which B1 data exists.
     """
     assert (rec_n < _RECURSION_MAX), (f"ERROR: Beyond max recursion!")
 
@@ -1172,7 +1172,7 @@ def _label_b1_wetness_get_t12_idx(
             #       linear fitting.
             print(f"WARNING: TEROS-12 data jumps {day_1} to {day_2}; using "
                   f"first datapoint from {day_2}.")
-            return idx+1
+            return (idx, True)
         else:
             # If within the same day, print a warning.
             print(f"WARNING: TEROS-12 data jumps from {t_prev} "
@@ -1184,7 +1184,7 @@ def _label_b1_wetness_get_t12_idx(
 
     if (t >= t_prev) and (t < t_next):
         # Hit the right interval.
-        return idx
+        return (idx, False)
     elif (t < t_prev):
         # Go backwards here.
         return _label_b1_wetness_get_t12_idx(
@@ -1236,23 +1236,28 @@ def _label_b1_wetness_get_teros12_labels(
     for t in t_b1:
         # NOTE: Need to constrain against long jumps in TEROS-12 time.
         # Start by locating previous/next TEROS-12 rows.
-        idx_t12 = _label_b1_wetness_get_t12_idx(
+        idx_t12, day_jump = _label_b1_wetness_get_t12_idx(
                 idx=idx_t12,
                 rows=rows_t12,
                 t=t
             )
+        if day_jump:
+            # If data jumps a day, use the next TEROS-12 datapoint until we
+            # catch up.
+            vwc_now_est = rows_t12[idx_t12+1]
+        else:
+            # If all is as it should be, linearly interpolate:
+            # Unzip TEROS-12 rows for math.
+            [t_t12_prev, vwc_prev] = [float(i) for i in rows_t12[idx_t12]]
+            [t_t12_next, vwc_next] = [float(i) for i in rows_t12[idx_t12+1]]
+            
+            # Said math.
+            m = (vwc_next - vwc_prev) / (t_t12_next - t_t12_prev)        
+            vwc_now_est = vwc_prev + m * (t - t_t12_prev)
 
-        # Unzip TEROS-12 rows for math.
-        [t_t12_prev, vwc_prev] = [float(i) for i in rows_t12[idx_t12]]
-        [t_t12_next, vwc_next] = [float(i) for i in rows_t12[idx_t12+1]]
-        
-        # Said math.
-        m = (vwc_next - vwc_prev) / (t_t12_next - t_t12_prev)        
-        vwc_now_est = vwc_prev + m * (t - t_t12_prev)
-
-        # Add estimated VWC with t to the new DF.
-        df_b1.loc[df_b1["Timestamp (Epoch-UTC-ms)"]  == t,
-                  f"Est VWC (%-{depth}in)"] = vwc_now_est
+            # Add estimated VWC with t to the new DF.
+            df_b1.loc[df_b1["Timestamp (Epoch-UTC-ms)"]  == t,
+                      f"Est VWC (%-{depth}in)"] = vwc_now_est
 
     return df_b1
 
