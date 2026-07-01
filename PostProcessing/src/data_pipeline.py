@@ -2,14 +2,14 @@
 data_pipeline.py
 
 Author:
-    Taylor Kergan
     nubby
+    Taylor Kergan
 
 Date:
-    11 Dec 2025
+    1 Jul 2026
 
 Version:
-    1.0.1
+    1.0.2
 """
 from __future__ import annotations
 
@@ -56,45 +56,72 @@ IMU_FEATURES_QCAT: Sequence[str] = (
 """
 # Feature definitions from B1 for now.
 IMU_FEATURES_B1: Sequence[str] = (
-    "IMUAccx",
-    "IMUAccy",
-    "IMUAccz",
-    "IMUGyrroll",
-    "IMUGyrpitch",
-    "IMUGyryaw",
-)
+        "IMUQw",
+        "IMUQx",
+        "IMUQy",
+        "IMUQz"
+    )
 
 # Ground reaction force features.
 FORCE_FEATURES: Sequence[str] = (
-    "FL_x (N)",
-    "FL_y (N)",
-    "FL_z (N)",
-    "FR_x (N)",
-    "FR_y (N)",
-    "FR_z (N)",
-    "BR_x (N)",
-    "BR_y (N)",
-    "BR_z (N)",
-    "BL_x (N)",
-    "BL_y (N)",
-    "BL_z (N)",
-)
+        "FL_x (N)",
+        "FL_y (N)",
+        "FL_z (N)",
+        "FR_x (N)",
+        "FR_y (N)",
+        "FR_z (N)",
+        "BR_x (N)",
+        "BR_y (N)",
+        "BR_z (N)",
+        "BL_x (N)",
+        "BL_y (N)",
+        "BL_z (N)",
+    )
+
+# Joint angle features.
+JANGLE_FEATURES: Sequence[str] = (
+        "FRHipQ (rad)",
+        "FRThighQ (rad)",
+        "FRKneeQ (rad)",
+        "FLHipQ (rad)",
+        "FLThighQ (rad)",
+        "FLKneeQ (rad)",
+        "RRHipQ (rad)",
+        "RRThighQ (rad)",
+        "RRKneeQ (rad)",
+        "RLHipQ (rad)",
+        "RLThighQ (rad)",
+        "RLKneeQ (rad)",
+    )
 
 # Joint torque features.
 JTORQUE_FEATURES: Sequence[str] = (
-    "FRHipT (Nm)",
-    "FLHipT (Nm)",
-    "RRHipT (Nm)",
-    "RLHipT (Nm)",
-    "FRThighT (Nm)",
-    "FLThighT (Nm)",
-    "RRThighT (Nm)",
-    "RLThighT (Nm)",
-    "FRCalfT (Nm)",
-    "FLCalfT (Nm)",
-    "RRCalfT (Nm)",
-    "RLCalfT (Nm)",
-)
+        "FRHipT (Nm)",
+        "FRThighT (Nm)",
+        "FRKneeT (Nm)",
+        "FLHipT (Nm)",
+        "FLThighT (Nm)",
+        "FLKneeT (Nm)",
+        "RRHipT (Nm)",
+        "RRThighT (Nm)",
+        "RRKneeT (Nm)",
+        "RLHipT (Nm)",
+        "RLThighT (Nm)",
+        "RLKneeT (Nm)",
+    )
+
+# Labels.
+LABELS: Sequence[str] = (
+        "SBD (g/mL-avg-0in)",
+        #"SBD (g/mL-avg-4in)",
+        #"SBD (g/mL-avg-7in)",
+        "SPR (PSI-avg-3in)",
+        #"SPR (PSI-avg-4in)",
+        #"SPR (PSI-avg-7in)",
+        "Est VWC (%-4in)",
+        "Est VWC (%-7in)",
+        "Est VWC (%-10in)"
+    )
 
 
 @dataclass(frozen=True)
@@ -280,14 +307,18 @@ def _window_segment(
     return windows
 
 def _load_raw_qcat_dataset(
-    terrains: List[str],
-    data_dir: Path,
-    num_trials: int = 10,
-    num_steps: int = 8,
-    window_size: int | None = None,
-    stride: int | None = None,
-) -> tuple:
-    """Load selected QCAT datasets with SPR labels."""
+        terrains: List[str],
+        data_dir: Path,
+        num_trials: int = 10,
+        num_steps: int = 8,
+        window_size: int | None = None,
+        stride: int | None = None,
+    ) -> tuple:
+    """
+    _load_raw_qcat_dataset(...) -> tuple
+
+    Load selected QCAT datasets with SPR labels.
+    """
     sequences: List[np.ndarray] = []
     labels: List[int] = []
     lengths: List[int] = []
@@ -403,48 +434,27 @@ def _load_raw_qcat_dataset(
     return (sequences, labels, lengths, metadata)
 
 def _load_raw_b1_dataset(
-    terrains: List[str],
-    data_dir: Path,
-    num_trials: int = 10,
-    num_steps: int = 8,
-    window_size: int | None = None,
-    stride: int | None = None,
-) -> tuple:
-    """Load selected B1 datasets with SPR labels."""
+        data_dir: Path,
+        num_trials: int = 10,
+        num_steps: int = 8,
+        window_size: int | None = None,
+        stride: int | None = None,
+    ) -> tuple:
+    """
+    _load_raw_b1_dataset(...) -> (sequences, labels, lengths, metadata)
+
+    Load selected B1 datasets with SPR/SBD labels.
+    """
     sequences: List[np.ndarray] = []
     labels: List[int] = []
     lengths: List[int] = []
     metadata: List[SampleMetadata] = []
-    # NOTE: This could be modified, but for only B1 at least is alright.
-    speed = 0
 
-    B1_LABELS_LUT = {
-        "concrete": {
-            "index": 0
-        },
-        "grass": {
-            "index": 1
-        },
-        "gravel": {
-            "index": 2
-        },
-        "mulch": {
-            "index": 3
-        },
-        "dirt": {
-            "index": 4
-        },
-        "sand": {
-            "index": 5
-        },
-    }
-    # Load datasets from each trial for the desired terrains.
-    # TODO: Update preprocessing script to properly label dataset terrains.
+    # Load datasets from each trial.
     # TODO: Re-encode this framework to pair temporally aligned SPR values with
-    # other sensor data (and GPS).
+    #       other sensor data (and GPS).
+    # TODO(nubby, 7/1/2026): Reformat this to use all data in Data/ folder.
     for terrain in terrains:
-        t_index = B1_LABELS_LUT[terrain]["index"]
-        #terrain_sprs = np.array(QCAT_LABELS_LUT[terrain]["SPR"]) / 1000 # Norm.
         combined_path = data_dir / f"{t_index}_combined.csv"
         if not combined_path.exists():
             raise FileNotFoundError(f"Missing sensor files for terrain "
@@ -503,16 +513,20 @@ def _load_raw_b1_dataset(
 # TODO(nubby): Allow for selective/combined input of B1 data.
 # TODO(nubby): Change num_classes to 3 for "NC", "IDC", and "C".
 def load_raw_dataset(
-    data_dir: Path,
-    num_classes: int = 6,
-    speeds: Sequence[int] = (1, 2, 3, 4, 5, 6),
-    num_trials: int = 10,
-    num_steps: int = 8,
-    window_size: int | None = None,
-    stride: int | None = None,
-    mode: str = "qcat",
-) -> RawSequenceDataset:
-    """Parses and aligns the IMU + force CSV files into per-step sequences."""
+        data_dir: Path,
+        num_classes: int = 6,
+        speeds: Sequence[int] = (1, 2, 3, 4, 5, 6),
+        num_trials: int = 10,
+        num_steps: int = 8,
+        window_size: int | None = None,
+        stride: int | None = None,
+    ) -> RawSequenceDataset:
+    """
+    load_raw_dataset(...) -> RawSequenceDataset
+
+    Parses and aligns the CSV files into per-step sequences of IMU quaternions,
+    joint angles, and joint torques.
+    """
     sequences: List[np.ndarray] = []
     labels: List[List[int]] = []
     lengths: List[int] = []
@@ -520,52 +534,33 @@ def load_raw_dataset(
 
     # Shape feature vector and load data based on training mode (always use IMU
     # data).
+    raw = _load_raw_b1_dataset(
+            data_dir=data_dir,
+            num_trials=num_trials,
+            num_steps=num_steps,
+            window_size=window_size,
+            stride=stride
+        )
+    sequences += raw[0]
+    labels += raw[1]
+    lengths += raw[2]
+    metadata += raw[3]
+
     feature_names: List[str] = []
 
-    if mode == "qcat" or mode == "combined":
-        #selected_terrains = ["concrete", "grass", "dirt", "sand"]
-        selected_terrains = ["grass", "dirt", "sand"]
-        feature_names += list(FORCE_FEATURES)
-        feature_names += list(IMU_FEATURES_QCAT)
-        raw = _load_raw_qcat_dataset(
-            terrains=selected_terrains,
-            data_dir=data_dir,
-            num_trials=num_trials,
-            num_steps=num_steps,
-            window_size=window_size,
-            stride=stride
-        )
-        sequences += raw[0]
-        labels += raw[1]
-        lengths += raw[2]
-        metadata += raw[3]
-
-    if mode == "b1" or mode == "combined":
-        #selected_terrains = ["concrete", "grass", "sand"]
-        selected_terrains = ["grass", "sand"]
-        feature_names += list(JTORQUE_FEATURES)
-        feature_names += list(IMU_FEATURES_B1)
-
-        raw = _load_raw_b1_dataset(
-            terrains=selected_terrains,
-            data_dir=data_dir,
-            num_trials=num_trials,
-            num_steps=num_steps,
-            window_size=window_size,
-            stride=stride
-        )
-        sequences += raw[0]
-        labels += raw[1]
-        lengths += raw[2]
-        metadata += raw[3]
+    # TODO
+    feature_names += list(JTORQUE_FEATURES)
+    feature_names += list(JANGLES_FEATURES)
+    feature_names += list(IMU_FEATURES_B1)
 
     #labels=np.asarray(labels, dtype=np.int64),
+
     return RawSequenceDataset(
-        sequences=sequences,
+        feature_names=feature_names,
         labels=np.array(labels),
         lengths=np.asarray(lengths, dtype=np.int64),
         metadata=metadata,
-        feature_names=feature_names,
+        sequences=sequences
     )
 
 def _compute_split_counts(n_trials: int, train_frac: float, val_frac: float) -> Tuple[int, int, int]:
@@ -632,15 +627,17 @@ def _compute_feature_stats(
 
 
 def build_data_bundle(
-    data_dir: Path,
-    train_frac: float = 0.6,
-    val_frac: float = 0.2,
-    seed: int = 13,
-    window_size: int | None = None,
-    stride: int | None = None,
-    mode: str = "qcat",
-) -> TerrainDataBundle:
+        data_dir: Path,
+        train_frac: float = 0.6,
+        val_frac: float = 0.2,
+        seed: int = 13,
+        window_size: int | None = None,
+        stride: int | None = None,
+        mode: str = "qcat",
+    ) -> TerrainDataBundle:
     """
+    build_data_bundle(...) -> TerrainDataBundle
+
     Loads raw data, performs splits, and returns ready-to-use torch datasets.
     Data/Features used in training are selectable with the "mode" flag:
         + mode: "qcat"      <- Open-source dataset only.
