@@ -23,22 +23,20 @@ public:
     }
     */
     // High-level port.
-    Custom(uint8_t level):
-	    safe(LeggedType::B1),
-	    udp(level, 8090, "192.168.123.220", 8082)
-	{
-		udp.InitCmdData(cmd);
-		//udp.print = true;
-	}
+    Custom(uint8_t level): 
+        udp(level, 8090, "192.168.123.220", 8082){
+    }
     void UDPUpdate();
     void RobotControl();
 
-    Safety safe;
+    void UDPSend();
+    void UDPRecv();
+
     UDP udp;
-    HighCmd cmd = {0};
     //LowState state = {0};
     HighState state = {0};
 
+    Safety safe;
     int motiontime = 0;
     float dt = 0.002;     // 0.001~0.01
 
@@ -77,39 +75,69 @@ void Custom::RobotControl()
     cmd.velocity[1] = 0.0f;
     cmd.yawSpeed = 0.0f;
     cmd.reserve = 0;
-    // Print headers.
-    std::cout << "time (ms),surface,forwardSpeed (m/s),sideSpeed (m/s),rotateSpeed (m?/s),yawSpeed(rad/s),eval_id,";
 
-    // Joint angles.
-    std::cout << "FRHipQ (rad),FRThighQ (rad),FRKneeQ (rad),";
-    std::cout << "FLHipQ (rad),FLThighQ (rad),FLKneeQ (rad),";
-    std::cout << "RRHipQ (rad),RRThighQ (rad),RRKneeQ (rad),";
-    std::cout << "RLHipQ (rad),RLThighQ (rad),RLKneeQ (rad),";
+    if (motiontime > 0)
+    {
+        cmd.mode = 2;
+    }
 
-    // Joint velocities.
-    std::cout << "FRHipdQ (rps),FRThighdQ (rps),FRKneedQ (rps),";
-    std::cout << "FLHipdQ (rps),FLThighdQ (rps),FLKneedQ (rps),";
-    std::cout << "RRHipdQ (rps),RRThighdQ (rps),RRKneedQ (rps),";
-    std::cout << "RLHipdQ (rps),RLThighdQ (rps),RLKneedQ (rps),";
+    // Output all data as a CSV to stdout.
+    std::cout << timestamp << "," << SURFACE << ",";
+    std::cout << state.velocity[0] << ",";
+    std::cout << state.velocity[1] << ",";
+    std::cout << state.velocity[2] << ",";
+    std::cout << state.yawSpeed << ",";
 
-    // Joint accelerations.
-    std::cout << "FRHipd2Q (rps^2),FRThighd2Q (rps^2),FRKneed2Q (rps^2),";
-    std::cout << "FLHipd2Q (rps^2),FLThighd2Q (rps^2),FLKneed2Q (rps^2),";
-    std::cout << "RRHipd2Q (rps^2),RRThighd2Q (rps^2),RRKneed2Q (rps^2),";
-    std::cout << "RLHipd2Q (rps^2),RLThighd2Q (rps^2),RLKneed2Q (rps^2),";
+    std::cout << EVAL_ID << ",";
 
-    // Estimated joint torques.
-    std::cout << "FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),";
-    std::cout << "FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),";
-    std::cout << "RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),";
-    std::cout << "RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),";
+    // Angle of each joint.
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].q << ",";
+        std::cout << state.motorState[i*3+1].q << ",";
+        std::cout << state.motorState[i*3+2].q << ",";
+    }
 
-    // NOTE: The below is a string that can be used to fix previously mislabeled
-    //          headers (fixes a bug).
-    //FRHipT (Nm),FRThighT (Nm),FRKneeT (Nm),FLHipT (Nm),FLThighT (Nm),FLKneeT (Nm),RRHipT (Nm),RRThighT (Nm),RRKneeT (Nm),RLHipT (Nm),RLThighT (Nm),RLKneeT (Nm),
-    // Foot forces.
-    std::cout << "FRFootF (N),FLFootF (N),RRFootF (N),RLFootF (N),";
+    // Raw angle of each joint.
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].q_raw << ",";
+        std::cout << state.motorState[i*3+1].q_raw << ",";
+        std::cout << state.motorState[i*3+2].q_raw << ",";
+    }
 
+    // Velocity of each joint (angular).
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].dq << ",";
+        std::cout << state.motorState[i*3+1].dq << ",";
+        std::cout << state.motorState[i*3+2].dq << ",";
+    }
+
+    // Raw velocity of each joint (angular).
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].dq_raw << ",";
+        std::cout << state.motorState[i*3+1].dq_raw << ",";
+        std::cout << state.motorState[i*3+2].dq_raw << ",";
+    }
+
+    // Acceleration of each joint (angular).
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].ddq << ",";
+        std::cout << state.motorState[i*3+1].ddq << ",";
+        std::cout << state.motorState[i*3+2].ddq << ",";
+    }
+
+    // Raw acceleration of each joint (angular).
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].ddq_raw << ",";
+        std::cout << state.motorState[i*3+1].ddq_raw << ",";
+        std::cout << state.motorState[i*3+2].ddq_raw << ",";
+    }
+
+    // Torque for each joint.
+    for (uint8_t i = 0; i < 4; i++) {
+        std::cout << state.motorState[i*3].tauEst << ",";
+        std::cout << state.motorState[i*3+1].tauEst << ",";
+        std::cout << state.motorState[i*3+2].tauEst << ",";
+    }
 
     std::cout << state.imu.accelerometer[0] << ",";
     std::cout 	    << state.imu.accelerometer[1] << ",";
@@ -184,6 +212,11 @@ int main(void)
     Custom custom(HIGHLEVEL);
     InitEnvironment();
     LoopFunc loop_control("control_loop", custom.dt,    boost::bind(&Custom::RobotControl, &custom));
+<<<<<<< HEAD
+=======
+    LoopFunc loop_udpSend("udp_send", custom.dt, 3, boost::bind(&Custom::UDPSend, &custom));
+    LoopFunc loop_udpRecv("udp_recv", custom.dt, 3, boost::bind(&Custom::UDPRecv, &custom));
+>>>>>>> main
     LoopFunc loop_udp("udp_update",     custom.dt, 3, boost::bind(&Custom::UDPUpdate,      &custom));
 
     loop_control.start();
