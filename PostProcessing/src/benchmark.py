@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    30 Jun 2026
+    1 Jul 2026
 
 Version:
-    1.0.1
+    1.0.2
 """
 from __future__ import annotations
 
@@ -647,7 +647,7 @@ if __name__ == "__main__":
             epochs=args.epochs,
             lr=args.lr,
             models=args.models,
-            no_cuda=args.no_cuda
+            no_cuda=args.no_cuda,
             output_dir=args.output_dir,
             patience=args.patience,
             seed=args.seed,

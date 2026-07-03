@@ -9,7 +9,7 @@ Date:
     1 Jul 2026
 
 Version:
-    1.0.2
+    1.0.3
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
+import os
 import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -55,7 +56,7 @@ IMU_FEATURES_QCAT: Sequence[str] = (
     "yawSpeed(rad/s)",
 """
 # Feature definitions from B1 for now.
-IMU_FEATURES_B1: Sequence[str] = (
+FEATURES_IMU: Sequence[str] = (
         "IMUQw",
         "IMUQx",
         "IMUQy",
@@ -79,7 +80,7 @@ FORCE_FEATURES: Sequence[str] = (
     )
 
 # Joint angle features.
-JANGLE_FEATURES: Sequence[str] = (
+FEATURES_JANGLE: Sequence[str] = (
         "FRHipQ (rad)",
         "FRThighQ (rad)",
         "FRKneeQ (rad)",
@@ -95,7 +96,7 @@ JANGLE_FEATURES: Sequence[str] = (
     )
 
 # Joint torque features.
-JTORQUE_FEATURES: Sequence[str] = (
+FEATURES_JTORQUE: Sequence[str] = (
         "FRHipT (Nm)",
         "FRThighT (Nm)",
         "FRKneeT (Nm)",
@@ -110,27 +111,32 @@ JTORQUE_FEATURES: Sequence[str] = (
         "RLKneeT (Nm)",
     )
 
-# Labels.
-LABELS: Sequence[str] = (
-        "SBD (g/mL-avg-0in)",
-        #"SBD (g/mL-avg-4in)",
-        #"SBD (g/mL-avg-7in)",
-        "SPR (PSI-avg-3in)",
-        #"SPR (PSI-avg-4in)",
-        #"SPR (PSI-avg-7in)",
+# VWC features from TEROS-12 sensors.
+FEATURES_VWC: Sequence[str] = (
         "Est VWC (%-4in)",
         "Est VWC (%-7in)",
         "Est VWC (%-10in)"
     )
 
+# Labels.
+LABELS_SBD: Sequence[str] = (
+        "SBD (g/mL-avg-0in)",
+        #"SBD (g/mL-avg-4in)",
+        #"SBD (g/mL-avg-7in)",
+    )
+LABELS_SPR: Sequence[str] = (
+        "SPR (PSI-avg-3in)",
+        #"SPR (PSI-avg-4in)",
+        #"SPR (PSI-avg-7in)",
+    )
 
 @dataclass(frozen=True)
 class SampleMetadata:
-    """Lightweight description of where each sequence originated."""
+    """
+    SampleMetadata
 
-    terrain: int
-    speed: int
-    trial: int
+    Lightweight description of where each sequence originated.
+    """
     step: int
     length: int
     window: int = 0  # index of the sliding window within the step
@@ -138,8 +144,11 @@ class SampleMetadata:
 
 @dataclass
 class RawSequenceDataset:
-    """Holds the un-normalised sensor sequences before splitting."""
+    """
+    RawSequenceDataset
 
+    Holds the un-normalised sensor sequences before splitting.
+    """
     sequences: List[np.ndarray]
     labels: np.ndarray
     lengths: np.ndarray
@@ -151,14 +160,17 @@ class RawSequenceDataset:
 
 
 class SequenceDataset(Dataset):
-    """Torch dataset that stores variable-length sequences along with metadata."""
+    """
+    SequenceDataset(Dataset)
 
+    Torch dataset that stores variable-length sequences along with metadata.
+    """
     def __init__(
         self,
-        sequences: List[torch.Tensor],
         labels: torch.Tensor,
         lengths: torch.Tensor,
         metadata: List[SampleMetadata],
+        sequences: List[torch.Tensor]
     ) -> None:
         if not (len(sequences) == len(labels) == len(lengths) == len(metadata)):
             raise ValueError("Dataset inputs must have matching lengths.")
@@ -170,7 +182,11 @@ class SequenceDataset(Dataset):
     def __len__(self) -> int:
         return len(self._sequences)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, SampleMetadata]:
+    def __getitem__(self, idx: int) -> Tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            SampleMetadata]:
         return (
             self._sequences[idx],
             self._lengths[idx],
@@ -180,8 +196,18 @@ class SequenceDataset(Dataset):
 
     @staticmethod
     def collate_fn(
-        batch: Sequence[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, SampleMetadata]]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Sequence[SampleMetadata]]:
+        batch: Sequence[Tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            SampleMetadata
+        ]]
+    ) -> Tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            Sequence[SampleMetadata]
+        ]:
         """Pads variable-length sequences per batch."""
         sequences, lengths, labels, metadata = zip(*batch)
         padded = pad_sequence(sequences, batch_first=True)  # shape (B, T_max, F)
@@ -192,8 +218,11 @@ class SequenceDataset(Dataset):
 
 @dataclass
 class TerrainDataBundle:
-    """Container for train/val/test datasets and their shared statistics."""
+    """
+    TerrainDataBundle
 
+    Container for train/val/test datasets and their shared statistics.
+    """
     train: SequenceDataset
     val: SequenceDataset
     test: SequenceDataset
@@ -202,9 +231,17 @@ class TerrainDataBundle:
     feature_names: Sequence[str]
 
     def dataloader(
-        self, split: str, batch_size: int, shuffle: bool = True, num_workers: int = 0
+        self,
+        batch_size: int,
+        split: str,
+        num_workers: int = 0,
+        shuffle: bool = True
     ) -> DataLoader:
-        dataset = {"train": self.train, "val": self.val, "test": self.test}[split]
+        dataset = {
+                "train": self.train,
+                "val": self.val,
+                "test": self.test
+            }[split]
         return DataLoader(
             dataset,
             batch_size=batch_size,
@@ -253,41 +290,87 @@ def _segment_trial_imu_force(
         segments.append(combined[start:end])
     return segments, step_len
 
-def _segment_trial_combined(
-    combined_trial: pd.DataFrame,
-    num_steps: int,
-) -> Tuple[List[np.ndarray], int]:
-    """Aligns a trial by truncating to the shared length."""
-    # TODO: This is basically just bloatware RN.
-    min_len = len(combined_trial)
-    if min_len < num_steps:
-        raise ValueError(f"Trial too short ({min_len}) to segment into {num_steps} steps.")
-    step_len = min_len // num_steps
-    usable_len = step_len * num_steps
+def _get_df_labels(df: pd.DataFrame) -> Tuple[Tuple[float], Tuple[float]]:
+    """
+    _get_df_labels(df) -> labels
+    """
+    # Group all label features.
+    sbd_cols = list(LABELS_SBD)
+    spr_cols = list(LABELS_SPR)
 
-    imu_cols = list(IMU_FEATURES_B1)
-    jtorque_cols = list(JTORQUE_FEATURES)
-    imu_values = combined_trial.loc[: usable_len - 1, imu_cols].to_numpy(dtype=np.float32)
-    jtorque_values = combined_trial.loc[: usable_len - 1, jtorque_cols].to_numpy(dtype=np.float32)
+    # Extract only the first label for each column.
+    sbd_labels = df[sbd_cols].to_numpy(dtype=np.float32)[0]
+    spr_labels = df[spr_cols].to_numpy(dtype=np.float32)[0]
+
+    # Combine labels into a single array.
+    labels = np.concatenate([
+            sbd_labels,
+            spr_labels
+        ])
+
+    return labels
+
+def _segment_trial_combined(
+        df: pd.DataFrame,
+        num_steps: int,
+    ) -> Tuple[List[np.ndarray], int]:
+    """
+    _segment_trial_combined(df, num_steps) -> (segments, step_len)
+
+    Aligns a trial by truncating to the shared number of steps.
+
+    Note:
+        Why does each trial have different step sizes?
+    """
+    min_len = len(df)
+    if min_len < num_steps:
+        raise ValueError(
+            f"Trial too short ({min_len}) to segment into {num_steps} steps."
+        )
+    seg_len = min_len // num_steps
+    usable_len = seg_len * num_steps
+
+    # Create lists of feature names.
+    imu_cols = list(FEATURES_IMU)
+    jtorque_cols = list(FEATURES_JTORQUE)
+    jangle_cols = list(FEATURES_JANGLE)
+    vwc_cols = list(FEATURES_VWC)
+
+    # Combine sensor values into a numpy array of the largest size that can be
+    # cleanly divided into `num_steps` segments.
+    imu_values = df.loc[:usable_len-1, imu_cols].to_numpy(dtype=np.float32)
+    jtorque_values = df.loc[:usable_len-1, jtorque_cols].to_numpy(
+            dtype=np.float32)
+    jangle_values = df.loc[:usable_len-1, jangle_cols].to_numpy(
+            dtype=np.float32)
+    vwc_values = df.loc[:usable_len-1, jangle_cols].to_numpy(dtype=np.float32)
     combined = np.concatenate([
-        imu_values,
-        jtorque_values,
-    ], axis=1)
+            imu_values,
+            jtorque_values,
+            jangle_values,
+            vwc_values
+        ], axis=1)
 
     segments: List[np.ndarray] = []
-    for step_idx in range(num_steps):
-        start = step_idx * step_len
-        end = start + step_len
-        segments.append(combined[start:end])
-    return segments, step_len
 
+    # Cleanly divide the DataFrame into segments.
+    for seg_idx in range(num_steps):
+        start = seg_idx * seg_len
+        end = start + seg_len
+        segments.append(combined[start:end])
+
+    return segments, seg_len
 
 def _window_segment(
-    segment: np.ndarray,
-    window_size: int | None,
-    stride: int | None,
-) -> List[np.ndarray]:
-    """Generates sliding windows for a single step segment."""
+        segment: np.ndarray,
+        window_size: int | None,
+        stride: int | None
+    ) -> List[np.ndarray]:
+    """
+    _window_segment(segment, window_size, stride) -> windows
+
+    Generates sliding windows for a single step segment.
+    """
     if window_size is None:
         return [segment]
     if window_size <= 0:
@@ -306,216 +389,84 @@ def _window_segment(
         windows.append(segment[-window:])
     return windows
 
-def _load_raw_qcat_dataset(
-        terrains: List[str],
-        data_dir: Path,
-        num_trials: int = 10,
-        num_steps: int = 8,
-        window_size: int | None = None,
-        stride: int | None = None,
-    ) -> tuple:
-    """
-    _load_raw_qcat_dataset(...) -> tuple
-
-    Load selected QCAT datasets with SPR labels.
-    """
-    sequences: List[np.ndarray] = []
-    labels: List[int] = []
-    lengths: List[int] = []
-    metadata: List[SampleMetadata] = []
-
-    # Create a LUT for decoding and labeling QCAT datasets with SPR estimates.
-    # Each SPR listed has linearly-separated depths of 3" * (index + 1) deep.
-    spr = lambda spr0, d, r : spr0 + d*r
-    QCAT_LABELS_LUT = {
-        "concrete": {
-            "index": 0,
-            "SPR": [1, 1, 1]
-        },
-        "grass": {
-            "index": 1,
-            "SPR": [
-                0.2395,
-                0.2390,
-                0.336
-            ]
-        },
-        "gravel": {
-            "index": 2,
-            "SPR": [0, 0, 0]
-        },
-        "mulch": {
-            "index": 3,
-            "SPR": [0, 0, 0]
-        },
-        "dirt": {
-            "index": 4,
-            "SPR": [
-                spr(0.200, 0, 0.100),
-                spr(0.200, 1, 0.100),
-                spr(0.200, 2, 0.100)
-            ]
-        },
-        "sand": {
-            "index": 5,
-            "SPR": [    # Using averages from Natural Bridges State Beach.
-                0.0655,
-                0.1570,
-                0.2565
-            ]
-        },
-    }
-    speeds = (1, 2, 3, 4, 5, 6) # Gather data from all speeds.
-
-    # Load datasets from each trial for the desired terrains.
-    for terrain in terrains:
-        t_index = QCAT_LABELS_LUT[terrain]["index"]
-        terrain_sprs = np.array(QCAT_LABELS_LUT[terrain]["SPR"]) / spr_max # Norm.
-        #terrain_sprs = np.array((QCAT_LABELS_LUT[terrain]["SPR"])
-        #terrain_sprs = np.array(np.log(QCAT_LABELS_LUT[terrain]["SPR"]))
-        for speed in speeds:
-            imu_path = data_dir / f"{t_index}_{speed}_legSensors_imu.csv"
-            force_path = data_dir / f"{t_index}_{speed}_legSensors_raw.csv"
-            if not imu_path.exists() or not force_path.exists():
-                raise FileNotFoundError(f"Missing sensor files for terrain "
-                                        f"{terrain}, speed {speed}.")
-
-            imu_df = _read_sensor_csv(imu_path)
-            force_df = _read_sensor_csv(force_path)
-
-            imu_trials = sorted(imu_df["eval_id"].unique())
-            force_trials = sorted(force_df["eval_id"].unique())
-            common_trials = [
-                trial for trial in imu_trials if trial in force_trials
-            ]
-
-            if len(common_trials) != num_trials:
-                warnings.warn(
-                    f"Expected {num_trials} trials but found "
-                    f"{len(common_trials)} for terrain {terrain}, speed "
-                    f"{speed}. Proceeding with shared trials only."
-                )
-
-            for trial in common_trials:
-                imu_trial = imu_df[
-                    imu_df["eval_id"] == trial
-                ].reset_index(drop=True)
-                force_trial = force_df[
-                    force_df["eval_id"] == trial
-                ].reset_index(drop=True)
-                segments, step_len = _segment_trial_imu_force(
-                    imu_trial,
-                    force_trial,
-                    num_steps
-                )
-
-                for step_idx, segment in enumerate(segments):
-                    windows = _window_segment(segment, window_size, stride)
-                    for window_idx, window_segment in enumerate(windows):
-                        sequences.append(window_segment)
-                        labels.append(np.asarray(terrain_sprs))
-                        """
-                        label = torch.zeros_like(torch.Tensor(terrain_sprs))
-                        label[(terrain_sprs >= 200) & (terrain_sprs < 300)] = 1
-                        label[terrain_sprs >= 300 ]= 2
-                        labels.append(label)
-                        """
-                        lengths.append(len(window_segment))
-                        metadata.append(
-                            SampleMetadata(
-                                terrain=t_index,
-                                speed=speed,
-                                trial=int(trial),
-                                step=step_idx,
-                                length=len(window_segment),
-                                window=window_idx,
-                            )
-                        )
-    return (sequences, labels, lengths, metadata)
-
 def _load_raw_b1_dataset(
-        data_dir: Path,
+        data_file_paths: list[str],
         num_trials: int = 10,
         num_steps: int = 8,
         window_size: int | None = None,
         stride: int | None = None,
-    ) -> tuple:
+    ) -> Tuple[
+            List[np.ndarray],
+            List[int],
+            List[np.ndarray],
+            List[SampleMetadata]
+        ]:
     """
     _load_raw_b1_dataset(...) -> (sequences, labels, lengths, metadata)
 
     Load selected B1 datasets with SPR/SBD labels.
     """
     sequences: List[np.ndarray] = []
-    labels: List[int] = []
+    labels: List[float] = []
     lengths: List[int] = []
     metadata: List[SampleMetadata] = []
 
-    # Load datasets from each trial.
     # TODO: Re-encode this framework to pair temporally aligned SPR values with
     #       other sensor data (and GPS).
-    # TODO(nubby, 7/1/2026): Reformat this to use all data in Data/ folder.
-    for terrain in terrains:
-        combined_path = data_dir / f"{t_index}_combined.csv"
-        if not combined_path.exists():
-            raise FileNotFoundError(f"Missing sensor files for terrain "
-                                    f"{terrain}.")
-        # Read B1 sensor file with IMU and joint torques.
-        combined_df = _read_sensor_csv(combined_path)
+    for path in data_file_paths:
+        # Load DFs from each trial.
+        df = pd.read_csv(path)
 
-        combined_trials = sorted(combined_df["eval_id"].unique())
-
-        if len(combined_trials) != num_trials:
-            warnings.warn(
-                f"Expected {num_trials} trials but found "
-                f"{len(combined_trials)} for terrain {terrain}. "
-                f"Proceeding with shared trials only."
+        # Get labels from DFs.
+        these_labels = _get_df_labels(df=df)
+        
+        # Split DFs into temporal data segments.
+        segments, segment_len = _segment_trial_combined(
+                df=df,
+                num_steps=num_steps
             )
 
-        for trial in combined_trials:
-            combined_trial = combined_df[
-                combined_df["eval_id"] == trial
-            ].reset_index(drop=True)
-            terrain_sprs = [
-                combined_trial["Mean SPR 1 (PSI)"].mean() / spr_max,
-                combined_trial["Mean SPR 2 (PSI)"].mean() / spr_max,
-                combined_trial["Mean SPR 3 (PSI)"].mean() / spr_max
-            ]
-            segments, step_len = _segment_trial_combined(
-                combined_trial,
-                num_steps
-            )
-
-            for step_idx, segment in enumerate(segments):
-                windows = _window_segment(segment, window_size, stride)
-                for window_idx, window_segment in enumerate(windows):
-                    sequences.append(window_segment)
-                    labels.append(np.asarray(terrain_sprs))
-                    """
-                    label = torch.zeros_like(torch.Tensor(terrain_sprs))
-                    label[(terrain_sprs >= 200) & (terrain_sprs < 300)] = 1
-                    label[terrain_sprs >= 300 ]= 2
-                    labels.append(label)
-                    """
-                    lengths.append(len(window_segment))
-                    metadata.append(
-                        SampleMetadata(
-                            terrain=t_index,
-                            speed=speed,
-                            trial=int(trial),
-                            step=step_idx,
-                            length=len(window_segment),
-                            window=window_idx,
-                        )
+        # NOTE: "step" == "segement".
+        for step_idx, segment in enumerate(segments):
+            # Now we divide each step/segment into rolling windows.
+            windows = _window_segment(segment, window_size, stride)
+            for window_idx, window_segment in enumerate(windows):
+                # Add each window segment with paired labels.
+                sequences.append(window_segment)
+                labels.append(these_labels)
+                lengths.append(len(window_segment))
+                metadata.append(
+                    SampleMetadata(
+                        step=step_idx,
+                        length=len(window_segment),
+                        window=window_idx,
                     )
+                )
+
     return (sequences, labels, lengths, metadata)
 
+def _ls_data_file_paths(
+        data_dir: Path
+        ) -> list[str]:
+    """
+    _ls_data_file_paths(data_dir) -> data_file_paths
+    """
+    paths = []
+    for base, _, fs in data_dir.walk():
+        for f in fs:
+            if str(f).split(".")[-1] == "csv":
+                path = "/".join([str(base), str(f)])
+                if os.path.isfile(path):
+                    paths.append(path)
 
-# TODO(nubby): Allow for selective/combined input of B1 data.
-# TODO(nubby): Change num_classes to 3 for "NC", "IDC", and "C".
+    # Raise an error if no data files found.
+    if len(paths) == 0:
+        raise FileNotFoundError
+
+    return paths
+
 def load_raw_dataset(
         data_dir: Path,
-        num_classes: int = 6,
-        speeds: Sequence[int] = (1, 2, 3, 4, 5, 6),
         num_trials: int = 10,
         num_steps: int = 8,
         window_size: int | None = None,
@@ -531,11 +482,14 @@ def load_raw_dataset(
     labels: List[List[int]] = []
     lengths: List[int] = []
     metadata: List[SampleMetadata] = []
+    feature_names: List[str] = []
 
-    # Shape feature vector and load data based on training mode (always use IMU
-    # data).
+    # First load available datasets from the selected directory.
+    data_file_paths = _ls_data_file_paths(data_dir=data_dir)
+
+    # Shape feature vector and load data based on selections.
     raw = _load_raw_b1_dataset(
-            data_dir=data_dir,
+            data_file_paths=data_file_paths,
             num_trials=num_trials,
             num_steps=num_steps,
             window_size=window_size,
@@ -546,12 +500,10 @@ def load_raw_dataset(
     lengths += raw[2]
     metadata += raw[3]
 
-    feature_names: List[str] = []
-
     # TODO
-    feature_names += list(JTORQUE_FEATURES)
-    feature_names += list(JANGLES_FEATURES)
-    feature_names += list(IMU_FEATURES_B1)
+    feature_names += list(FEATURES_JTORQUE)
+    feature_names += list(FEATURES_JANGLE)
+    feature_names += list(FEATURES_IMU)
 
     #labels=np.asarray(labels, dtype=np.int64),
 
@@ -637,19 +589,18 @@ def build_data_bundle(
     ) -> TerrainDataBundle:
     """
     build_data_bundle(...) -> TerrainDataBundle
-
+base, paths
     Loads raw data, performs splits, and returns ready-to-use torch datasets.
-    Data/Features used in training are selectable with the "mode" flag:
-        + mode: "qcat"      <- Open-source dataset only.
-        + mode: "b1"        <- Dataset collected from our B1 robot.
-        + mode: "combined"  <- [WIP] Combined dataset.
+    Data/Features are not yet selectable.
+
+    Todo:
+        * Make SWC as a label/feature selectable.
     """
     # Start by loading the selected datasets.
     raw = load_raw_dataset(
         data_dir=data_dir,
-        window_size=window_size,
         stride=stride,
-        mode=mode
+        window_size=window_size
     )
 
     # Random seed-based assignment for replicability.
