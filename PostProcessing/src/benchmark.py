@@ -393,35 +393,45 @@ def benchmark(
 
     Main training pipeline entry point.
     """
+    # Set up device for training.
     device = set_up(
             no_cuda=no_cuda,
             output_dir=output_dir,
             seed=seed,
         )
 
-    # Create data bundle for training/evals.
+    # Create data bundle for train/val/test splits.
+    # TODO(nubby):  Further divide individual trials, either by a fixed size or
+    #               by steps.
     data_bundle = build_data_bundle(
-        data_dir,
-        seed=seed,
-        window_size=window_size,
-        stride=stride,
-        mode="b1"   # NOTE: b1,qcat
-    )
+            data_dir=data_dir,
+            seed=seed,
+            stride=stride,
+            window_size=window_size
+        )
     input_dim = len(data_bundle.feature_names)
+    # TODO(nubby):  See further note.
     num_classes = 3
 
     config = TrainingConfig(
-        epochs=epochs,
-        batch_size=batch_size,
-        lr=lr,
-        weight_decay=weight_decay,
-        patience=patience,
-    )
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            weight_decay=weight_decay,
+            patience=patience,
+        )
 
+    # TODO(nubby, 7/3/2026):    Convert Classifiers into Regressors.
     available_models = {
         "lstm": LSTMClassifier(input_dim=input_dim, num_classes=num_classes),
-        "tcn": TemporalConvNetClassifier(input_dim=input_dim, num_classes=num_classes),
-        "transformer": TransformerClassifier(input_dim=input_dim, num_classes=num_classes),
+        "tcn": TemporalConvNetClassifier(
+            input_dim=input_dim,
+            num_classes=num_classes
+        ),
+        "transformer": TransformerClassifier(
+            input_dim=input_dim,
+            num_classes=num_classes
+        )
     }
 
     unknown = set(models) - set(available_models.keys())

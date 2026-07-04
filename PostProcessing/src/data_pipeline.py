@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    1 Jul 2026
+    3 Jul 2026
 
 Version:
-    1.0.3
+    1.0.4
 """
 from __future__ import annotations
 
@@ -136,10 +136,21 @@ class SampleMetadata:
     SampleMetadata
 
     Lightweight description of where each sequence originated.
+
+    Members:
+        idx_compaction  (int)   Number of compaction events completed.
+        idx_wetness     (int)   Number of wetting events completed.
+        step            (int)
+        trial           (str)   Unique trial name.
+        length          (int)
+        window          (int)
     """
-    step: int
+    idx_compaction: int
+    idx_wetness: int
     length: int
-    window: int = 0  # index of the sliding window within the step
+    step: int
+    trial: str
+    window: int = 0  # Index of the sliding window within the step.
 
 
 @dataclass
@@ -217,9 +228,9 @@ class SequenceDataset(Dataset):
 
 
 @dataclass
-class TerrainDataBundle:
+class FullDataBundle:
     """
-    TerrainDataBundle
+    FullDataBundle
 
     Container for train/val/test datasets and their shared statistics.
     """
@@ -290,9 +301,18 @@ def _segment_trial_imu_force(
         segments.append(combined[start:end])
     return segments, step_len
 
-def _get_df_labels(df: pd.DataFrame) -> Tuple[Tuple[float], Tuple[float]]:
+def _get_df_labels(df: pd.DataFrame) -> Tuple[
+        Tuple[Tuple[float], Tuple[float]],
+        int, int, str
+    ]:
     """
-    _get_df_labels(df) -> labels
+    _get_df_labels(df) -> labels, idx_compaction, idx_wetness, trial
+
+    Returns:
+        labels          (tuple[tuple(float), tuple(float)]) [SBD, SPR] labels.
+        idx_compaction  (int)
+        idx_wetness     (int)
+        trial           (str)                               Unique trial name.
     """
     # Group all label features.
     sbd_cols = list(LABELS_SBD)
@@ -302,13 +322,18 @@ def _get_df_labels(df: pd.DataFrame) -> Tuple[Tuple[float], Tuple[float]]:
     sbd_labels = df[sbd_cols].to_numpy(dtype=np.float32)[0]
     spr_labels = df[spr_cols].to_numpy(dtype=np.float32)[0]
 
+    # Extract compaction, wetness, and trial label for the DF.
+    idx_compaction = df["Compaction Level (index)"].astype(int).values[0]
+    idx_wetness = df["SWC Level (index)"].astype(int).values[0]
+    trial = df["Dataset Label"].astype(str).values[0]
+
     # Combine labels into a single array.
     labels = np.concatenate([
             sbd_labels,
             spr_labels
         ])
 
-    return labels
+    return labels, idx_compaction, idx_wetness, trial
 
 def _segment_trial_combined(
         df: pd.DataFrame,
@@ -418,7 +443,7 @@ def _load_raw_b1_dataset(
         df = pd.read_csv(path)
 
         # Get labels from DFs.
-        these_labels = _get_df_labels(df=df)
+        these_labels, idx_compaction, idx_wetness, trial = _get_df_labels(df=df)
         
         # Split DFs into temporal data segments.
         segments, segment_len = _segment_trial_combined(
@@ -437,9 +462,12 @@ def _load_raw_b1_dataset(
                 lengths.append(len(window_segment))
                 metadata.append(
                     SampleMetadata(
-                        step=step_idx,
+                        idx_compaction=idx_compaction,
+                        idx_wetness=idx_wetness,
                         length=len(window_segment),
-                        window=window_idx,
+                        step=step_idx,
+                        trial=trial,
+                        window=window_idx
                     )
                 )
 
@@ -500,9 +528,11 @@ def load_raw_dataset(
     lengths += raw[2]
     metadata += raw[3]
 
-    # TODO
+    # Create a full list of feature names.
+    # TODO(nubby): Can this be merged in earlier for efficiency?
     feature_names += list(FEATURES_JTORQUE)
     feature_names += list(FEATURES_JANGLE)
+    feature_names += list(FEATURES_VWC)
     feature_names += list(FEATURES_IMU)
 
     #labels=np.asarray(labels, dtype=np.int64),
@@ -515,10 +545,20 @@ def load_raw_dataset(
         sequences=sequences
     )
 
-def _compute_split_counts(n_trials: int, train_frac: float, val_frac: float) -> Tuple[int, int, int]:
-    """Computes integer trial counts per split with basic safeguards."""
+def _compute_split_counts(
+        n_trials: int,
+        train_frac: float,
+        val_frac: float
+    ) -> Tuple[int, int, int]:
+    """
+    _compute_split_counts(n_trials, train_frac, val_frac) -> (train, val, test)
+
+    Computes integer trial counts per split with basic safeguards.
+    """
     if n_trials <= 2:
-        raise ValueError("Need at least three trials to form train/val/test splits.")
+        raise ValueError(
+                "Need at least three trials to form train/val/test splits."
+            )
     train = max(1, int(round(n_trials * train_frac)))
     val = max(1, int(round(n_trials * val_frac)))
     if train + val >= n_trials:
@@ -533,27 +573,40 @@ def _compute_split_counts(n_trials: int, train_frac: float, val_frac: float) -> 
         test = n_trials - train - val
     return train, val, test
 
-
 def _assign_trial_splits(
-    metadata: Sequence[SampleMetadata],
-    train_frac: float,
-    val_frac: float,
-    rng: np.random.Generator,
-) -> Dict[Tuple[int, int, int], str]:
-    """Assigns each (terrain, speed, trial) tuple to a split."""
-    # First group trials under terrain and speed.
+        metadata: Sequence[SampleMetadata],
+        train_frac: float,
+        val_frac: float,
+        rng: np.random.Generator,
+    ) -> Dict[Tuple[int, int], str]:
+    """
+    _assign_trial_splits(metadata, train_frac, val_frac, rng) -> assigned_splits
+
+    Assigns each (compaction, wetness) tuple to a split (train, val, test).
+
+    """
+    # TODO(nubby): Consider splitting up trials into subtrials to increase
+    #               number of datapoints available for training. NOTE that this
+    #               would also split up temporally linked datasets, which may
+    #               be undesireable.
+    # First group trials under compaction events and soil wetness events.
     by_key: Dict[Tuple[int, int], List[int]] = {}
     for meta in metadata:
-        key = (meta.terrain, meta.speed)
+        key = (meta.idx_compaction, meta.idx_wetness)
+        # Prevent raising of exceptions when key not present.
         by_key.setdefault(key, [])
         if meta.trial not in by_key[key]:
             by_key[key].append(meta.trial)
 
-    assignment: Dict[Tuple[int, int, int], str] = {}
+    # Assign trials from each compaction/wetness level randomly to splits.
+    assignment: Dict[Tuple[int, int, str], str] = {}
     for key, trials in by_key.items():
+        # Randomly shuffle trials for each key value, then split accordingly.
         trials_copy = list(trials)
         rng.shuffle(trials_copy)
-        train_count, val_count, _ = _compute_split_counts(len(trials_copy), train_frac, val_frac)
+        train_count, val_count, _ = _compute_split_counts(
+                len(trials_copy), train_frac, val_frac
+            )
         train_trials = set(trials_copy[:train_count])
         val_trials = set(trials_copy[train_count : train_count + val_count])
         for trial in trials:
@@ -563,14 +616,19 @@ def _assign_trial_splits(
                 assignment[(key[0], key[1], trial)] = "val"
             else:
                 assignment[(key[0], key[1], trial)] = "test"
+
     return assignment
 
 
 def _compute_feature_stats(
-    sequences: Sequence[np.ndarray],
-    indices: Iterable[int],
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Derives mean/std from the provided subset."""
+        sequences: Sequence[np.ndarray],
+        indices: Iterable[int],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    _compute_feature_stats(sequences, indices) -> [mean, std]
+
+    Derives mean/std from the provided subset.
+    """
     stacked = np.concatenate([sequences[i] for i in indices], axis=0)
     mean = stacked.mean(axis=0, dtype=np.float64)
     std = stacked.std(axis=0, dtype=np.float64)
@@ -580,16 +638,15 @@ def _compute_feature_stats(
 
 def build_data_bundle(
         data_dir: Path,
+        seed: int = 13,
+        stride: int | None = None,
         train_frac: float = 0.6,
         val_frac: float = 0.2,
-        seed: int = 13,
-        window_size: int | None = None,
-        stride: int | None = None,
-        mode: str = "qcat",
-    ) -> TerrainDataBundle:
+        window_size: int | None = None
+    ) -> FullDataBundle:
     """
-    build_data_bundle(...) -> TerrainDataBundle
-base, paths
+    build_data_bundle(...) -> FullDataBundle
+
     Loads raw data, performs splits, and returns ready-to-use torch datasets.
     Data/Features are not yet selectable.
 
@@ -606,6 +663,8 @@ base, paths
     # Random seed-based assignment for replicability.
     rng = np.random.default_rng(seed)
 
+    # Randomly-split trials into (train, val, test) splits based on trial
+    # labels.
     assignment = _assign_trial_splits(
         metadata=raw.metadata,
         train_frac=train_frac,
@@ -613,33 +672,46 @@ base, paths
         rng=rng
     )
 
+    # Further obscure data labels by replacing tuple indices with ints.
     split_indices: Dict[str, List[int]] = {"train": [], "val": [], "test": []}
     for idx, meta in enumerate(raw.metadata):
-        split = assignment[(meta.terrain, meta.speed, meta.trial)]
+        split = assignment[(meta.idx_compaction, meta.idx_wetness, meta.trial)]
         split_indices[split].append(idx)
 
+    # Generate stats for training dataset for use in normalization.
     feature_mean_np, feature_std_np = _compute_feature_stats(
         raw.sequences,
         split_indices["train"]
     )
 
+    # TODO(nubby): Normalize training set labels?
+
     def make_dataset(indices: List[int]) -> SequenceDataset:
+        """
+        make_dataset(indices) -> SequenceDataset
+
+        Shape formatted sequences into tensors for ingestion into torch by
+        assigned split indices.
+        """
         seq_tensors: List[torch.Tensor] = []
         lengths_tensors: List[torch.Tensor] = []
         labels_tensors: List[torch.Tensor] = []
         metadata_subset: List[SampleMetadata] = []
+
         for idx in indices:
             seq = raw.sequences[idx]
+            # First normalize each sequence based on the training dataset stats.
+            # TODO(nubby): Is this just the z-score?
             norm_seq = (seq - feature_mean_np) / feature_std_np
             seq_tensors.append(torch.from_numpy(norm_seq.astype(np.float32)))
             lengths_tensors.append(
                 torch.tensor(raw.lengths[idx], dtype=torch.long)
             )
-            # TODO(nubby): Normalize here for some reason? Make this suck less.
             labels_tensors.append(
                 torch.tensor(raw.labels[idx], dtype=torch.float)
             )
             metadata_subset.append(raw.metadata[idx])
+
         return SequenceDataset(
             seq_tensors,
             torch.stack(labels_tensors),
@@ -647,14 +719,16 @@ base, paths
             metadata_subset
         )
 
+    # Convert splits into SequenceDataset for ingestion by torch.
     train_ds = make_dataset(split_indices["train"])
     val_ds = make_dataset(split_indices["val"])
     test_ds = make_dataset(split_indices["test"])
 
+    # Generate dataset-scale statistics.
     feature_mean = torch.from_numpy(feature_mean_np)
     feature_std = torch.from_numpy(feature_std_np)
 
-    return TerrainDataBundle(
+    return FullDataBundle(
         train=train_ds,
         val=val_ds,
         test=test_ds,

@@ -11,4 +11,5 @@ numpy<2
 pandas>=2.0
 matplotlib>=3.7
 seaborn>=0.13
+torch
 wandb>=0.16
