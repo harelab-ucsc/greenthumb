@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    1 Jul 2026
+    6 Jul 2026
 
 Version:
-    1.0.2
+    1.0.3
 """
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ import wandb
 
 """
 from .data_pipeline import build_data_bundle
-from .models import LSTMClassifier, TemporalConvNetClassifier, TransformerClassifier
+from .models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 """
 from data_pipeline import build_data_bundle
-from models import LSTMClassifier, TemporalConvNetClassifier, TransformerClassifier
+from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
 
 spr_max = 1000
@@ -112,8 +112,6 @@ def run_epoch(
     next_step = global_step
 
     for batch_idx, (inputs, lengths, labels, _) in enumerate(dataloader):
-        print(inputs.shape)
-        exit()
         step_id = global_step + batch_idx
         inputs = inputs.to(device)
         lengths = lengths.to(device)
@@ -147,7 +145,7 @@ def run_epoch(
         # Use only the first layer of SPRs for predictions.
         errors_abs = abs(preds[:,0] - labels[:,0])
         # Since PSI must fall within 11% of value, use percentage for success.
-        error_perc = error_abs / labels[:,0]
+        error_perc = errors_abs / labels[:,0]
 
         total_correct += (errors_abs <= spr_thresh).sum().item()
         total_examples += labels.size(0) * 3
@@ -450,14 +448,13 @@ def benchmark(
             weight_decay=weight_decay,
         )
 
-    # TODO(nubby, 7/3/2026):    Convert Classifiers into Regressors.
     available_models = {
-        "lstm": LSTMClassifier(input_dim=input_dim, num_classes=soil_layers),
-        "tcn": TemporalConvNetClassifier(
+        "lstm": LSTMEstimator(input_dim=input_dim, num_classes=soil_layers),
+        "tcn": TemporalConvNetEstimator(
             input_dim=input_dim,
             num_classes=soil_layers
         ),
-        "transformer": TransformerClassifier(
+        "transformer": TransformerEstimator(
             input_dim=input_dim,
             num_classes=soil_layers
         )

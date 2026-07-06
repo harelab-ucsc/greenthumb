@@ -1,3 +1,20 @@
+"""
+File:
+    models.py
+
+Description:
+    Temporally-encoded models with regression heads.
+
+Authors:
+    Taylor Kergan
+    nubby
+
+Date:
+    6 Jul 2026
+
+Version:
+    1.0.1
+"""
 from __future__ import annotations
 
 import math
@@ -22,9 +39,12 @@ def masked_mean(sequence: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
     return summed / denom
 
 
-class LSTMClassifier(nn.Module):
-    """Baseline bi-directional LSTM classifier."""
+class LSTMEstimator(nn.Module):
+    """
+    LSTMEstimator
 
+    Baseline bi-directional LSTM estimator.
+    """
     def __init__(
         self,
         input_dim: int,
@@ -50,17 +70,12 @@ class LSTMClassifier(nn.Module):
         )
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        print(inputs.shape)
-        print(inputs.shape[-1])
         packed = nn.utils.rnn.pack_padded_sequence(
             inputs, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        print(packed.data.shape)
-        exit()
         _, (h_n, _) = self.lstm(packed)
         # Concatenate the final states from both directions.
         last_hidden = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        print(last_hidden)
         return self.head(last_hidden)
 
 
@@ -124,8 +139,8 @@ class TemporalConvNet(nn.Module):
         return out.transpose(1, 2)  # back to (batch, time, features)
 
 
-class TemporalConvNetClassifier(nn.Module):
-    """Classifier head on top of a TCN backbone."""
+class TemporalConvNetEstimator(nn.Module):
+    """Estimator head on top of a TCN backbone."""
 
     def __init__(
         self,
@@ -169,8 +184,8 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class TransformerClassifier(nn.Module):
-    """Compact Transformer encoder classifier."""
+class TransformerEstimator(nn.Module):
+    """Compact Transformer encoder estimator."""
 
     def __init__(
         self,
