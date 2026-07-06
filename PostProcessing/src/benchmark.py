@@ -77,23 +77,28 @@ def set_seed(seed: int) -> None:
 
 
 def run_epoch(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    criterion: nn.Module,
-    device: torch.device,
-    *,
-    train: bool,
-    optimizer: torch.optim.Optimizer | None = None,
-    grad_clip: float = 1.0,
-    history: Optional[TrainingHistory] = None,
-    split: str = "train",
-    global_step: int = 0,
-    wandb_run: Optional[object] = None,
-    wandb_prefix: str = "",
-) -> Tuple[float, float, int]:
-    """Runs a single training or evaluation epoch and logs batch metrics if requested."""
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        criterion: nn.Module,
+        device: torch.device,
+        *,
+        train: bool,
+        optimizer: torch.optim.Optimizer | None = None,
+        grad_clip: float = 1.0,
+        history: Optional[TrainingHistory] = None,
+        split: str = "train",
+        global_step: int = 0,
+        wandb_run: Optional[object] = None,
+        wandb_prefix: str = "",
+    ) -> Tuple[float, float, int]:
+    """
+    run_epoch(...) -> ()
+
+    Runs a single training or evaluation epoch and logs batch metrics if
+    requested.
+    """
     #spr_thresh = 30  # 30 PSI of absolute error is acceptable.
-    spr_thresh = 30 / spr_max  # 30 PSI of absolute error is acceptable.
+    spr_thresh = 0.11   # Prediction must fall within 11% of target for success.
     if train:
         if optimizer is None:
             raise ValueError("Optimizer must be provided when train=True.")
@@ -107,6 +112,8 @@ def run_epoch(
     next_step = global_step
 
     for batch_idx, (inputs, lengths, labels, _) in enumerate(dataloader):
+        print(inputs.shape)
+        exit()
         step_id = global_step + batch_idx
         inputs = inputs.to(device)
         lengths = lengths.to(device)
@@ -139,6 +146,8 @@ def run_epoch(
         #errors_abs = abs(preds - logits)
         # Use only the first layer of SPRs for predictions.
         errors_abs = abs(preds[:,0] - labels[:,0])
+        # Since PSI must fall within 11% of value, use percentage for success.
+        error_perc = error_abs / labels[:,0]
 
         total_correct += (errors_abs <= spr_thresh).sum().item()
         total_examples += labels.size(0) * 3
@@ -150,17 +159,35 @@ def run_epoch(
 
 
 def train_and_evaluate(
-    model: nn.Module,
-    bundle,
-    device: torch.device,
-    config: TrainingConfig,
-    *,
-    model_name: str,
-    wandb_run: Optional[object] = None,
-) -> Tuple[Dict[str, float], TrainingHistory]:
-    train_loader = bundle.dataloader("train", batch_size=config.batch_size)
-    val_loader = bundle.dataloader("val", batch_size=config.batch_size)
-    test_loader = bundle.dataloader("test", batch_size=config.batch_size)
+        model: nn.Module,
+        bundle,
+        device: torch.device,
+        config: TrainingConfig,
+        *,
+        model_name: str,
+        wandb_run: Optional[object] = None,
+    ) -> Tuple[Dict[str, float], TrainingHistory]:
+    """
+    train_and_evaluate(...) -> {
+            "best_val_acc": best_val_acc,
+            "test_acc": test_acc,
+            "test_loss": test_loss,
+            "best_epoch": best_epoch,
+        },
+        history
+    """
+    train_loader = bundle.dataloader(
+            batch_size=config.batch_size,
+            split="train",
+        )
+    val_loader = bundle.dataloader(
+            batch_size=config.batch_size,
+            split="val",
+        )
+    test_loader = bundle.dataloader(
+            batch_size=config.batch_size,
+            split="test",
+        )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     #criterion = nn.CrossEntropyLoss()
@@ -370,7 +397,7 @@ def set_up(
 
 def benchmark(
         batch_size: int,
-        data_dir: Path,
+        data_dir: str,
         epochs: int,
         lr: float,
         models: list[str],
@@ -379,6 +406,7 @@ def benchmark(
         patience: float,
         seed: int,
         stride: int,
+        target: str,
         use_wandb: bool,
         wandb_entity: str,
         wandb_group: str,
@@ -407,30 +435,31 @@ def benchmark(
             data_dir=data_dir,
             seed=seed,
             stride=stride,
+            target=target,
             window_size=window_size
         )
     input_dim = len(data_bundle.feature_names)
-    # TODO(nubby):  See further note.
-    num_classes = 3
+    # Number of soil layers to predict (from the top layer down).
+    soil_layers = 1
 
     config = TrainingConfig(
-            epochs=epochs,
             batch_size=batch_size,
+            epochs=epochs,
             lr=lr,
-            weight_decay=weight_decay,
             patience=patience,
+            weight_decay=weight_decay,
         )
 
     # TODO(nubby, 7/3/2026):    Convert Classifiers into Regressors.
     available_models = {
-        "lstm": LSTMClassifier(input_dim=input_dim, num_classes=num_classes),
+        "lstm": LSTMClassifier(input_dim=input_dim, num_classes=soil_layers),
         "tcn": TemporalConvNetClassifier(
             input_dim=input_dim,
-            num_classes=num_classes
+            num_classes=soil_layers
         ),
         "transformer": TransformerClassifier(
             input_dim=input_dim,
-            num_classes=num_classes
+            num_classes=soil_layers
         )
     }
 
@@ -533,8 +562,8 @@ if __name__ == "__main__":
         )
     parser.add_argument(
             "--data-dir",
-            type=Path,
-            default=Path("data"),
+            type=str,
+            default="processed",
             help="Path to the data directory."
         )
     parser.add_argument(
@@ -639,6 +668,13 @@ if __name__ == "__main__":
             action="store_true",
             help="Force CPU execution even if CUDA is available."
         )
+    # TODO(nubby): Allow for dual prediction?
+    parser.add_argument(
+            "--target",
+            type=str,
+            default="spr",
+            help="Target choice for training/evals [\"spr\", \"sbd\"].",
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -662,6 +698,7 @@ if __name__ == "__main__":
             patience=args.patience,
             seed=args.seed,
             stride=args.stride,
+            target=args.target,
             use_wandb=args.use_wandb,
             wandb_entity=args.wandb_entity,
             wandb_group=args.wandb_group,

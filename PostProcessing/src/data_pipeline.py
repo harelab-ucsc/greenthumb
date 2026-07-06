@@ -14,11 +14,13 @@ Version:
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+import glob
+import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
-import os
 import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -178,10 +180,10 @@ class SequenceDataset(Dataset):
     """
     def __init__(
         self,
+        sequences: List[torch.Tensor],
         labels: torch.Tensor,
         lengths: torch.Tensor,
         metadata: List[SampleMetadata],
-        sequences: List[torch.Tensor]
     ) -> None:
         if not (len(sequences) == len(labels) == len(lengths) == len(metadata)):
             raise ValueError("Dataset inputs must have matching lengths.")
@@ -224,6 +226,7 @@ class SequenceDataset(Dataset):
         padded = pad_sequence(sequences, batch_first=True)  # shape (B, T_max, F)
         lengths_tensor = torch.stack(lengths, dim=0)
         labels_tensor = torch.stack(labels, dim=0)
+        metadata = list(metadata)
         return padded, lengths_tensor, labels_tensor, metadata
 
 
@@ -243,8 +246,8 @@ class FullDataBundle:
 
     def dataloader(
         self,
-        batch_size: int,
         split: str,
+        batch_size: int,
         num_workers: int = 0,
         shuffle: bool = True
     ) -> DataLoader:
@@ -254,7 +257,7 @@ class FullDataBundle:
                 "test": self.test
             }[split]
         return DataLoader(
-            dataset,
+            dataset=dataset,
             batch_size=batch_size,
             shuffle=shuffle if split == "train" else False,
             num_workers=num_workers,
@@ -301,7 +304,7 @@ def _segment_trial_imu_force(
         segments.append(combined[start:end])
     return segments, step_len
 
-def _get_df_labels(df: pd.DataFrame) -> Tuple[
+def _get_df_labels(df: pd.DataFrame, target: str) -> Tuple[
         Tuple[Tuple[float], Tuple[float]],
         int, int, str
     ]:
@@ -313,25 +316,26 @@ def _get_df_labels(df: pd.DataFrame) -> Tuple[
         idx_compaction  (int)
         idx_wetness     (int)
         trial           (str)                               Unique trial name.
+        target          (str)                               ["spr", "sbd"]
     """
     # Group all label features.
-    sbd_cols = list(LABELS_SBD)
-    spr_cols = list(LABELS_SPR)
+    target_lut = {
+            "sbd": list(LABELS_SBD),
+            "spr": list(LABELS_SPR)
+        }
 
     # Extract only the first label for each column.
-    sbd_labels = df[sbd_cols].to_numpy(dtype=np.float32)[0]
-    spr_labels = df[spr_cols].to_numpy(dtype=np.float32)[0]
+    try:
+        labels = df[target_lut[target]].to_numpy(dtype=np.float32)[0]
+    except KeyError as e:
+        print(e)
+        print(f"ERROR: Could not find column, {target} for use as target.")
+        exit()
 
     # Extract compaction, wetness, and trial label for the DF.
     idx_compaction = df["Compaction Level (index)"].astype(int).values[0]
     idx_wetness = df["SWC Level (index)"].astype(int).values[0]
     trial = df["Dataset Label"].astype(str).values[0]
-
-    # Combine labels into a single array.
-    labels = np.concatenate([
-            sbd_labels,
-            spr_labels
-        ])
 
     return labels, idx_compaction, idx_wetness, trial
 
@@ -418,8 +422,9 @@ def _load_raw_b1_dataset(
         data_file_paths: list[str],
         num_trials: int = 10,
         num_steps: int = 8,
-        window_size: int | None = None,
         stride: int | None = None,
+        target: str = "spr",
+        window_size: int | None = None,
     ) -> Tuple[
             List[np.ndarray],
             List[int],
@@ -443,7 +448,10 @@ def _load_raw_b1_dataset(
         df = pd.read_csv(path)
 
         # Get labels from DFs.
-        these_labels, idx_compaction, idx_wetness, trial = _get_df_labels(df=df)
+        these_labels, idx_compaction, idx_wetness, trial = _get_df_labels(
+                df=df,
+                target=target
+            )
         
         # Split DFs into temporal data segments.
         segments, segment_len = _segment_trial_combined(
@@ -475,17 +483,15 @@ def _load_raw_b1_dataset(
 
 def _ls_data_file_paths(
         data_dir: Path
-        ) -> list[str]:
+    ) -> list[str]:
     """
     _ls_data_file_paths(data_dir) -> data_file_paths
     """
     paths = []
-    for base, _, fs in data_dir.walk():
-        for f in fs:
-            if str(f).split(".")[-1] == "csv":
-                path = "/".join([str(base), str(f)])
-                if os.path.isfile(path):
-                    paths.append(path)
+    with os.scandir(data_dir) as dp:
+        for path in dp:
+            if (path.is_file() and path.name.endswith(".csv")):
+                paths.append(path)
 
     # Raise an error if no data files found.
     if len(paths) == 0:
@@ -494,11 +500,12 @@ def _ls_data_file_paths(
     return paths
 
 def load_raw_dataset(
-        data_dir: Path,
+        data_dir: str,
         num_trials: int = 10,
         num_steps: int = 8,
-        window_size: int | None = None,
         stride: int | None = None,
+        target: str = "spr",
+        window_size: int | None = None,
     ) -> RawSequenceDataset:
     """
     load_raw_dataset(...) -> RawSequenceDataset
@@ -520,8 +527,9 @@ def load_raw_dataset(
             data_file_paths=data_file_paths,
             num_trials=num_trials,
             num_steps=num_steps,
+            stride=stride,
+            target=target,
             window_size=window_size,
-            stride=stride
         )
     sequences += raw[0]
     labels += raw[1]
@@ -637,9 +645,10 @@ def _compute_feature_stats(
 
 
 def build_data_bundle(
-        data_dir: Path,
+        data_dir: str,
         seed: int = 13,
         stride: int | None = None,
+        target: str = "spr",
         train_frac: float = 0.6,
         val_frac: float = 0.2,
         window_size: int | None = None
@@ -648,7 +657,9 @@ def build_data_bundle(
     build_data_bundle(...) -> FullDataBundle
 
     Loads raw data, performs splits, and returns ready-to-use torch datasets.
-    Data/Features are not yet selectable.
+    Data/Features are not yet selectable, but targets can be selected as either:
+        + SPR 
+        + SBD
 
     Todo:
         * Make SWC as a label/feature selectable.
@@ -657,6 +668,7 @@ def build_data_bundle(
     raw = load_raw_dataset(
         data_dir=data_dir,
         stride=stride,
+        target=target.lower(),
         window_size=window_size
     )
 

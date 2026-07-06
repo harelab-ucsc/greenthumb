@@ -50,12 +50,17 @@ class LSTMClassifier(nn.Module):
         )
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        print(inputs.shape)
+        print(inputs.shape[-1])
         packed = nn.utils.rnn.pack_padded_sequence(
             inputs, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
+        print(packed.data.shape)
+        exit()
         _, (h_n, _) = self.lstm(packed)
         # Concatenate the final states from both directions.
         last_hidden = torch.cat([h_n[-2], h_n[-1]], dim=1)
+        print(last_hidden)
         return self.head(last_hidden)
 
 
