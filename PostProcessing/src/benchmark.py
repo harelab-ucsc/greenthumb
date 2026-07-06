@@ -79,6 +79,7 @@ def run_epoch(
         dataloader: torch.utils.data.DataLoader,
         criterion: nn.Module,
         device: torch.device,
+        target: str,
         train_mean: Tuple[float],
         train_std: Tuple[float],
         *,
@@ -99,6 +100,7 @@ def run_epoch(
 
     Args:
         ...
+        target      (str)           [spr, sbd]
         train_mean  (Tuple[float])  Mean values for each layer for success
                                     criteria evaluation.
         train_std   (Tuple[float])  STD of values for each layer for success
@@ -146,29 +148,38 @@ def run_epoch(
                 )
         # NOTE: Derivation of success criteria below:
         #
+        #   For SPR targets, success is within 11% of real value:
+        #
         #   z = (x-m)/std -> x  = std*z +m
         #                    x^ = std*z^+m
         #   * For success: abs((x-x^)/x) <= 0.11, where
         #       in which z = normalized label, z^ = predicted value,
         #       x = true label, and x^ = predicted label.
-        #   * This success criterion only applies to SPR labels: SBD labels
-        #       need more nuanced evaluations.
+        #
+        #   For SBD targets, success is <= RMSE = 0.12g/cm^3:
+        #
+        #     
+
         total_loss += loss.item() * labels.size(0)
         preds = logits
 
-        # Use only the first layer of SPRs for predictions.
+        # NOTE: Use only the first soil layer for predictions (currently).
         z_hat = preds[:,0]
         z = labels[:,0]
-        x_hat = train_std * z_hat + train_mean
+        y = train_std * z_hat + train_mean
         x = train_std * z + train_mean
 
-        # NOTE: Only valid for SPR usage for now.
-        # TODO(nubby):  Allow for selection of labels here.
-        errors_abs = abs(x_hat - x)
-        error_perc = errors_abs / x
-        total_correct += (error_perc <= 0.11).sum().item()
+        if (target == "spr"):
+            errors_abs = abs(y - x)
+            error_perc = errors_abs / x
+            total_correct += (error_perc <= 0.11).sum().item()
+        else:
+            # TODO(nubby):  Rationalize this metric; not sure if makes sense for
+            #               RMSE evaluation.
+            errors_rmse = torch.sqrt(torch.mean((y - x)**2))
+            total_correct += len(logits) if errors_rmse <= 0.12 else 0
 
-        total_examples += labels.size(0) * 3
+        total_examples += labels.size(0)
         next_step = step_id + 1
 
     avg_loss = total_loss / max(1, total_examples)
@@ -183,6 +194,7 @@ def train_and_evaluate(
         config: TrainingConfig,
         *,
         model_name: str,
+        target: str,
         train_mean: float,
         train_std: float,
         wandb_run: Optional[object] = None,
@@ -243,6 +255,7 @@ def train_and_evaluate(
             train_loader,
             criterion,
             device,
+            target=target,
             train_mean=train_mean,
             train_std=train_std,
             train=True,
@@ -259,6 +272,7 @@ def train_and_evaluate(
             val_loader,
             criterion,
             device,
+            target=target,
             train_mean=train_mean,
             train_std=train_std,
             train=False,
@@ -311,6 +325,7 @@ def train_and_evaluate(
         test_loader,
         criterion,
         device,
+        target=target,
         train_mean=train_mean,
         train_std=train_std,
         train=False,
@@ -563,6 +578,7 @@ def benchmark(
             data_bundle,
             device,
             config,
+            target=target,
             train_mean=train_mean,
             train_std=train_std,
             model_name=name,
@@ -711,7 +727,7 @@ if __name__ == "__main__":
             "--target",
             type=str,
             default="spr",
-            help="Target choice for training/evals [\"spr\", \"sbd\"].",
+            help="Target choice for training/evals [spr, sbd].",
         )
     args = parser.parse_args()
 
@@ -724,6 +740,8 @@ if __name__ == "__main__":
     if args.use_wandb and args.wandb_mode == "disabled":
         parser.error("--use-wandb cannot be combined with --wandb-mode "
                      "disabled.")
+    if args.target not in ["spr", "sbd"]:
+        parser.error("--target must be a either spr or sbd.")
 
     benchmark(
             batch_size=args.batch_size,

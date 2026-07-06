@@ -9,7 +9,7 @@ Date:
     6 Jul 2026
 
 Version:
-    1.0.5
+    1.0.6
 """
 from __future__ import annotations
 
@@ -27,8 +27,6 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
 import warnings
 
-
-spr_max = 1000
 
 # NOTE / TODO: Currently, each "combined.csv" dataset needs to be:
 #   1. Run through the preprocessing pipeline (after adding an "eval_id" column
