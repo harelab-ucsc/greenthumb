@@ -13,7 +13,7 @@ Date:
     6 Jul 2026
 
 Version:
-    1.0.1
+    1.0.2
 """
 from __future__ import annotations
 
@@ -165,14 +165,23 @@ class TemporalConvNetEstimator(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    """Classic sinusoidal positional encoding."""
+    """
+    PositionalEncoding
 
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 2000) -> None:
+    Classic sinusoidal positional encoding to encode temporal dependency.
+    """
+    def __init__(
+            self,
+            d_model: int,
+            dropout: float = 0.1,
+            max_len: int = 2000
+        ) -> None:
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (
+            -math.log(10000.0) / d_model))
         pe = torch.zeros(max_len, d_model)
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -185,8 +194,16 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerEstimator(nn.Module):
-    """Compact Transformer encoder estimator."""
+    """
+    TransformerEstimator
 
+    Compact Transformer encoder estimator.
+
+    Args:
+        ...
+        max_chunk_len   (int)   Max temporal sequence size. Each time step is
+                                1ms (default: 2000 == 2s).
+    """
     def __init__(
         self,
         input_dim: int,
@@ -196,6 +213,7 @@ class TransformerEstimator(nn.Module):
         dim_feedforward: int = 16,
         dropout: float = 0.1,
         num_classes: int = 3,
+        max_chunk_len: int = 2000
     ) -> None:
         super().__init__()
         self.input_projection = nn.Linear(input_dim, d_model)
@@ -208,18 +226,27 @@ class TransformerEstimator(nn.Module):
             activation="gelu",
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.positional_encoding = PositionalEncoding(d_model=d_model, dropout=dropout)
+        self.positional_encoding = PositionalEncoding(
+                d_model=d_model,
+                dropout=dropout,
+                max_len=max_chunk_len
+            )
         self.head = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Dropout(dropout),
             nn.Linear(d_model, num_classes),
         )
 
-    # TODO: Find where dimension mismatch between layers is occurring.
-    def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        mask = torch.arange(inputs.size(1), device=inputs.device).expand(inputs.size(0), inputs.size(1))
+    def forward(
+            self,
+            inputs: torch.Tensor,
+            lengths: torch.Tensor
+        ) -> torch.Tensor:
+        mask = torch.arange(
+                inputs.size(1),
+                device=inputs.device
+            ).expand(inputs.size(0), inputs.size(1))
         mask = mask >= lengths.unsqueeze(1)
-        #print(inputs)
         projected = self.input_projection(inputs)
         encoded = self.positional_encoding(projected)
         encoded = self.encoder(encoded, src_key_padding_mask=mask)

@@ -243,6 +243,8 @@ class FullDataBundle:
     feature_mean: torch.Tensor
     feature_std: torch.Tensor
     feature_names: Sequence[str]
+    train_mean: float
+    train_std: float
 
     def dataloader(
         self,
@@ -683,7 +685,7 @@ def build_data_bundle(
         raw.sequences,
         split_indices["train"]
     )
-    label_mean_np, label_std_np = _compute_label_stats(
+    labels_mean, labels_std = _compute_label_stats(
         labels=raw.labels,
         indices=split_indices["train"]
     )
@@ -711,7 +713,7 @@ def build_data_bundle(
                 torch.tensor(raw.lengths[idx], dtype=torch.long)
             )
             # Next normalize labels here.
-            norm_label = (label - label_mean_np) / label_std_np
+            norm_label = (label - labels_mean) / labels_std
             labels_tensors.append(
                 torch.tensor(norm_label, dtype=torch.float)
             )
@@ -740,4 +742,6 @@ def build_data_bundle(
         feature_mean=feature_mean,
         feature_std=feature_std,
         feature_names=raw.feature_names,
+        train_mean=labels_mean,
+        train_std=labels_std,
     )

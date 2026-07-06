@@ -9,7 +9,7 @@ Date:
     6 Jul 2026
 
 Version:
-    1.0.3
+    1.1.0
 """
 from __future__ import annotations
 
@@ -39,8 +39,6 @@ from .models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimato
 from data_pipeline import build_data_bundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
-
-spr_max = 1000
 
 @dataclass
 class TrainingConfig:
@@ -81,6 +79,8 @@ def run_epoch(
         dataloader: torch.utils.data.DataLoader,
         criterion: nn.Module,
         device: torch.device,
+        train_mean: Tuple[float],
+        train_std: Tuple[float],
         *,
         train: bool,
         optimizer: torch.optim.Optimizer | None = None,
@@ -96,9 +96,15 @@ def run_epoch(
 
     Runs a single training or evaluation epoch and logs batch metrics if
     requested.
+
+    Args:
+        ...
+        train_mean  (Tuple[float])  Mean values for each layer for success
+                                    criteria evaluation.
+        train_std   (Tuple[float])  STD of values for each layer for success
+                                    criteria evaluation.
+        ...
     """
-    #spr_thresh = 30  # 30 PSI of absolute error is acceptable.
-    spr_thresh = 0.11   # Prediction must fall within 11% of target for success.
     if train:
         if optimizer is None:
             raise ValueError("Optimizer must be provided when train=True.")
@@ -138,16 +144,30 @@ def run_epoch(
                     {f"{wandb_prefix}/train_batch_loss": loss.item()},
                     step=step_id,
                 )
-
+        # NOTE: Derivation of success criteria below:
+        #
+        #   z = (x-m)/std -> x  = std*z +m
+        #                    x^ = std*z^+m
+        #   * For success: abs((x-x^)/x) <= 0.11, where
+        #       in which z = normalized label, z^ = predicted value,
+        #       x = true label, and x^ = predicted label.
+        #   * This success criterion only applies to SPR labels: SBD labels
+        #       need more nuanced evaluations.
         total_loss += loss.item() * labels.size(0)
         preds = logits
-        #errors_abs = abs(preds - logits)
-        # Use only the first layer of SPRs for predictions.
-        errors_abs = abs(preds[:,0] - labels[:,0])
-        # Since PSI must fall within 11% of value, use percentage for success.
-        error_perc = errors_abs / labels[:,0]
 
-        total_correct += (errors_abs <= spr_thresh).sum().item()
+        # Use only the first layer of SPRs for predictions.
+        z_hat = preds[:,0]
+        z = labels[:,0]
+        x_hat = train_std * z_hat + train_mean
+        x = train_std * z + train_mean
+
+        # NOTE: Only valid for SPR usage for now.
+        # TODO(nubby):  Allow for selection of labels here.
+        errors_abs = abs(x_hat - x)
+        error_perc = errors_abs / x
+        total_correct += (error_perc <= 0.11).sum().item()
+
         total_examples += labels.size(0) * 3
         next_step = step_id + 1
 
@@ -163,6 +183,8 @@ def train_and_evaluate(
         config: TrainingConfig,
         *,
         model_name: str,
+        train_mean: float,
+        train_std: float,
         wandb_run: Optional[object] = None,
     ) -> Tuple[Dict[str, float], TrainingHistory]:
     """
@@ -187,7 +209,11 @@ def train_and_evaluate(
             split="test",
         )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay
+        )
     #criterion = nn.CrossEntropyLoss()
     criterion = nn.MSELoss()
     #criterion = nn.SmoothL1Loss()
@@ -217,6 +243,8 @@ def train_and_evaluate(
             train_loader,
             criterion,
             device,
+            train_mean=train_mean,
+            train_std=train_std,
             train=True,
             optimizer=optimizer,
             grad_clip=config.grad_clip,
@@ -231,6 +259,8 @@ def train_and_evaluate(
             val_loader,
             criterion,
             device,
+            train_mean=train_mean,
+            train_std=train_std,
             train=False,
             split="val",
         )
@@ -281,6 +311,8 @@ def train_and_evaluate(
         test_loader,
         criterion,
         device,
+        train_mean=train_mean,
+        train_std=train_std,
         train=False,
         split="test",
     )
@@ -436,6 +468,10 @@ def benchmark(
             target=target,
             window_size=window_size
         )
+    # Extract mean/STD from training set for later use.
+    train_mean = data_bundle.train_mean
+    train_std = data_bundle.train_std
+
     input_dim = len(data_bundle.feature_names)
     # Number of soil layers to predict (from the top layer down).
     soil_layers = 1
@@ -456,7 +492,8 @@ def benchmark(
         ),
         "transformer": TransformerEstimator(
             input_dim=input_dim,
-            num_classes=soil_layers
+            num_classes=soil_layers,
+            max_chunk_len=window_size
         )
     }
 
@@ -526,6 +563,8 @@ def benchmark(
             data_bundle,
             device,
             config,
+            train_mean=train_mean,
+            train_std=train_std,
             model_name=name,
             wandb_run=wandb_run,
         )
@@ -614,14 +653,16 @@ if __name__ == "__main__":
     parser.add_argument(
             "--window-size",
             type=int,
-            default=None,
-            help="Optional sliding window size (timesteps) applied within each gait step.",
+            default=2000,
+            help=("Optional sliding window size (timesteps) applied within each"
+                  " sequence/chunk/step used.")
         )
     parser.add_argument(
             "--stride",
             type=int,
             default=None,
-            help="Stride (timesteps) between sliding windows; defaults to window size for non-overlapping segments.",
+            help=("Stride (timesteps) between sliding windows; defaults to "
+                  "window size for non-overlapping segments.")
         )
     parser.add_argument(
             "--use-wandb",
