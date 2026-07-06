@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    3 Jul 2026
+    6 Jul 2026
 
 Version:
-    1.0.4
+    1.0.5
 """
 from __future__ import annotations
 
@@ -324,7 +324,7 @@ def _get_df_labels(df: pd.DataFrame, target: str) -> Tuple[
             "spr": list(LABELS_SPR)
         }
 
-    # Extract only the first label for each column.
+    # Extract only the first label for each column (same throughout).
     try:
         labels = df[target_lut[target]].to_numpy(dtype=np.float32)[0]
     except KeyError as e:
@@ -372,7 +372,7 @@ def _segment_trial_combined(
             dtype=np.float32)
     jangle_values = df.loc[:usable_len-1, jangle_cols].to_numpy(
             dtype=np.float32)
-    vwc_values = df.loc[:usable_len-1, jangle_cols].to_numpy(dtype=np.float32)
+    vwc_values = df.loc[:usable_len-1, vwc_cols].to_numpy(dtype=np.float32)
     combined = np.concatenate([
             imu_values,
             jtorque_values,
@@ -546,11 +546,11 @@ def load_raw_dataset(
     #labels=np.asarray(labels, dtype=np.int64),
 
     return RawSequenceDataset(
-        feature_names=feature_names,
+        sequences=sequences,
         labels=np.array(labels),
         lengths=np.asarray(lengths, dtype=np.int64),
         metadata=metadata,
-        sequences=sequences
+        feature_names=feature_names
     )
 
 def _compute_split_counts(
@@ -684,19 +684,20 @@ def build_data_bundle(
         rng=rng
     )
 
-    # Further obscure data labels by replacing tuple indices with ints.
+    # Lightweight reference structure using integer indices rather than unique
+    # metadata entries.
     split_indices: Dict[str, List[int]] = {"train": [], "val": [], "test": []}
     for idx, meta in enumerate(raw.metadata):
         split = assignment[(meta.idx_compaction, meta.idx_wetness, meta.trial)]
         split_indices[split].append(idx)
 
-    # Generate stats for training dataset for use in normalization.
+    # Generate stats from training dataset for use in normalization.
     feature_mean_np, feature_std_np = _compute_feature_stats(
         raw.sequences,
         split_indices["train"]
     )
 
-    # TODO(nubby): Normalize training set labels?
+    # TODO(nubby): Normalize training set labels.
 
     def make_dataset(indices: List[int]) -> SequenceDataset:
         """
@@ -719,16 +720,17 @@ def build_data_bundle(
             lengths_tensors.append(
                 torch.tensor(raw.lengths[idx], dtype=torch.long)
             )
+            # TODO(nubby): Normalize labels here.
             labels_tensors.append(
                 torch.tensor(raw.labels[idx], dtype=torch.float)
             )
             metadata_subset.append(raw.metadata[idx])
 
         return SequenceDataset(
-            seq_tensors,
-            torch.stack(labels_tensors),
-            torch.stack(lengths_tensors),
-            metadata_subset
+            sequences=seq_tensors,
+            labels=torch.stack(labels_tensors),
+            lengths=torch.stack(lengths_tensors),
+            metadata=metadata_subset
         )
 
     # Convert splits into SequenceDataset for ingestion by torch.
