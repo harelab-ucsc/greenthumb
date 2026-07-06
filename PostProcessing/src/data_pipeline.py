@@ -273,37 +273,6 @@ def _read_sensor_csv(path: Path) -> pd.DataFrame:
         raise ValueError(f"CSV {path} is missing expected 'eval_id' column.")
     return df.sort_values("time (ms)").reset_index(drop=True)
 
-
-# TODO(nubby): Add joint torques.
-def _segment_trial_imu_force(
-    imu_trial: pd.DataFrame,
-    force_trial: pd.DataFrame,
-    num_steps: int,
-) -> Tuple[List[np.ndarray], int]:
-    """Aligns an IMU and force trial by truncating to the shared length."""
-    min_len = min(len(imu_trial), len(force_trial))
-    if min_len < num_steps:
-        raise ValueError(f"Trial too short ({min_len}) to segment into {num_steps} steps.")
-    step_len = min_len // num_steps
-    usable_len = step_len * num_steps
-
-    imu_cols = list(IMU_FEATURES_QCAT)
-    force_cols = list(FORCE_FEATURES)
-    imu_values = imu_trial.loc[: usable_len - 1, imu_cols].to_numpy(dtype=np.float32)
-    force_values = force_trial.loc[: usable_len - 1, force_cols].to_numpy(dtype=np.float32)
-    #jtorque_values = jtorque_trial.loc[: usable_len - 1, jtorque_cols].to_numpy(dtype=np.float32)
-    combined = np.concatenate([
-        imu_values,
-        force_values,
-    ], axis=1)
-
-    segments: List[np.ndarray] = []
-    for step_idx in range(num_steps):
-        start = step_idx * step_len
-        end = start + step_len
-        segments.append(combined[start:end])
-    return segments, step_len
-
 def _get_df_labels(df: pd.DataFrame, target: str) -> Tuple[
         Tuple[Tuple[float], Tuple[float]],
         int, int, str
@@ -635,14 +604,32 @@ def _compute_feature_stats(
     """
     _compute_feature_stats(sequences, indices) -> [mean, std]
 
-    Derives mean/std from the provided subset.
+    Derives mean/std from the provided subset of a sequence for training.
     """
     stacked = np.concatenate([sequences[i] for i in indices], axis=0)
     mean = stacked.mean(axis=0, dtype=np.float64)
     std = stacked.std(axis=0, dtype=np.float64)
+    # Replace extremely low STDs with 1.0 to avoid division by 0.
     std[std < 1e-6] = 1.0
     return mean.astype(np.float32), std.astype(np.float32)
 
+def _compute_label_stats(
+        labels: Sequence[np.ndarray],
+        indices: Iterable[int]
+        ) -> Tuple[float, float]:
+    """
+    _compute_label_stats(labels, indices) -> [mean, std]
+
+    Derives mean/std from the provided labels. Can be thought of as fewer dims
+    than _compute_feature_stats() above.
+    """
+    stacked = np.concatenate([labels[i] for i in indices], axis=0)
+    mean = stacked.mean(axis=0, dtype=np.float64)
+    std = stacked.std(axis=0, dtype=np.float64)
+    # Replace extremely low STDs with 1.0 to avoid division by 0.
+    if (std < 1e-6):
+        std = 1.0
+    return mean.astype(np.float32), std.astype(np.float32)
 
 def build_data_bundle(
         data_dir: str,
@@ -696,8 +683,10 @@ def build_data_bundle(
         raw.sequences,
         split_indices["train"]
     )
-
-    # TODO(nubby): Normalize training set labels.
+    label_mean_np, label_std_np = _compute_label_stats(
+        labels=raw.labels,
+        indices=split_indices["train"]
+    )
 
     def make_dataset(indices: List[int]) -> SequenceDataset:
         """
@@ -713,6 +702,7 @@ def build_data_bundle(
 
         for idx in indices:
             seq = raw.sequences[idx]
+            label = raw.labels[idx]
             # First normalize each sequence based on the training dataset stats.
             # TODO(nubby): Is this just the z-score?
             norm_seq = (seq - feature_mean_np) / feature_std_np
@@ -720,9 +710,10 @@ def build_data_bundle(
             lengths_tensors.append(
                 torch.tensor(raw.lengths[idx], dtype=torch.long)
             )
-            # TODO(nubby): Normalize labels here.
+            # Next normalize labels here.
+            norm_label = (label - label_mean_np) / label_std_np
             labels_tensors.append(
-                torch.tensor(raw.labels[idx], dtype=torch.float)
+                torch.tensor(norm_label, dtype=torch.float)
             )
             metadata_subset.append(raw.metadata[idx])
 
