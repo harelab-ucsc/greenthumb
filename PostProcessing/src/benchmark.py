@@ -40,6 +40,10 @@ from data_pipeline import build_data_bundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
 
+# Useful macros/global variables.
+spr_frac_e_max = 0.11   # Fractional percentage of SPR for success.
+sbd_rmse_max = 0.03     # RMSE prediction threshold for success.
+
 @dataclass
 class TrainingConfig:
     epochs: int = 30
@@ -172,12 +176,12 @@ def run_epoch(
         if (target == "spr"):
             errors_abs = abs(y - x)
             error_perc = errors_abs / x
-            total_correct += (error_perc <= 0.11).sum().item()
+            total_correct += (error_perc <= spr_frac_e_max).sum().item()
         else:
             # TODO(nubby):  Rationalize this metric; not sure if makes sense for
             #               RMSE evaluation.
             errors_rmse = torch.sqrt(torch.mean((y - x)**2))
-            total_correct += len(logits) if errors_rmse <= 0.12 else 0
+            total_correct += len(logits) if errors_rmse <= sbd_rmse_max else 0
 
         total_examples += labels.size(0)
         next_step = step_id + 1
