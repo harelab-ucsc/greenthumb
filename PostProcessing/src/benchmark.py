@@ -52,6 +52,7 @@ class TrainingConfig:
     weight_decay: float = 1e-3
     patience: int = 30
     grad_clip: float = 1.0
+    classic_mode: bool = False
 
 
 @dataclass
@@ -356,25 +357,38 @@ def train_and_evaluate(
         # TODO(nubby)
         scheduler.step(val_acc)
 
+        # Evaluate model performance.
         if (val_perc_e_mean > best_val_percent_error):
-            # Drop "mean" for ease of use.
+            # Evaluation for SPR (drop "mean" for ease of use).
             best_val_percent_error = val_perc_e_mean
-            if (target == "spr"):
-                best_state = copy.deepcopy(model.state_dict())
-                best_epoch = epoch
-                epochs_no_improve = 0
-            else:
-                epochs_no_improve += 1
-        if (val_rmse > best_val_rmse):
+            if not config.classic_mode:
+                if (target == "spr"):
+                    best_state = copy.deepcopy(model.state_dict())
+                    best_epoch = epoch
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+
+        if (val_rmse < best_val_rmse):
+            # Evaluation for SBD.
             best_val_rmse = val_rmse
-            if (target == "sbd"):
+            if not config.classic_mode:
+                if (target == "sbd"):
+                    best_state = copy.deepcopy(model.state_dict())
+                    best_epoch = epoch
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+
+        if (val_acc > best_val_acc):
+            # Evaluation for classic mode.
+            best_val_acc = val_acc
+            if config.classic_mode:
                 best_state = copy.deepcopy(model.state_dict())
                 best_epoch = epoch
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
-        if (val_acc > best_val_acc):
-            best_val_acc = val_acc
         """
         if (val_acc > best_val_acc):
             best_val_acc = val_acc
@@ -393,13 +407,13 @@ def train_and_evaluate(
         history.learning_rates.append(optimizer.param_groups[0]["lr"])
 
         print(
-            f"Epoch {epoch:02d} (Training) "
+            f"Epoch {epoch:02d} (Train)\t"
             f"| train_loss={train_loss:.4f} "
             f"train_acc={train_acc:.3f} "
             f"train_rmse={train_rmse:.4f} "
             f"train_perc_e_mean={train_perc_e_mean:.3f} "
             f"train_perc_e_std={train_perc_e_std:.3f}\n"
-            f"Epoch {epoch:02d} (Val) "
+            f"Epoch {epoch:02d} (Val)\t\t"
             f"| val_loss={val_loss:.4f} "
             f"val_acc={val_acc:.3f} "
             f"val_rmse={val_rmse:.4f} "
@@ -566,6 +580,7 @@ def set_up(
 
 def benchmark(
         batch_size: int,
+        classic_mode: bool,
         data_dir: str,
         epochs: int,
         lr: float,
@@ -621,6 +636,7 @@ def benchmark(
             lr=lr,
             patience=patience,
             weight_decay=weight_decay,
+            classic_mode=classic_mode
         )
 
     available_models = {
@@ -865,6 +881,14 @@ if __name__ == "__main__":
             default="spr",
             help="Target choice for training/evals [spr, sbd].",
         )
+    parser.add_argument(
+            "--classic-mode",
+            action="store_true",
+            help=("Evaluate model performance based on number of correct "
+                  "predictions made, versus RMSE (for SBD) and percent error "
+                  "mean (for SPR) in standard mode.")
+
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -881,6 +905,7 @@ if __name__ == "__main__":
 
     benchmark(
             batch_size=args.batch_size,
+            classic_mode=args.classic_mode,
             data_dir=args.data_dir,
             epochs=args.epochs,
             lr=args.lr,
