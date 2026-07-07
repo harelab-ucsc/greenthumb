@@ -68,6 +68,30 @@ class TrainingHistory:
     test_loss: Optional[float] = None
     test_acc: Optional[float] = None
 
+@dataclass
+class EpochStats:
+    """
+    EpochStats
+
+    Statistics about the performance of a split for a given target. Unless
+    otherwise indicated, these statistics refer to "true" targets, as opposed
+    to normalized targets.
+
+    Args:
+        ...
+        n_preds (int)   Number of predictions made (per timestep).
+        ...
+    """
+    accuracy_mean: float
+    loss_mean: float
+    mse: float
+    n_examples: int
+    percent_e_mean: float
+    percent_e_std: float
+    rmse: float
+    target: str
+    accuracy_std: float = 0
+    loss_std: float = 0
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -95,9 +119,9 @@ def run_epoch(
         global_step: int = 0,
         wandb_run: Optional[object] = None,
         wandb_prefix: str = "",
-    ) -> Tuple[float, float, int]:
+    ) -> Tuple[EpochStats, int]:
     """
-    run_epoch(...) -> ()
+    run_epoch(...) -> (epoch_stats, idx_next_step)
 
     Runs a single training or evaluation epoch and logs batch metrics if
     requested.
@@ -162,25 +186,33 @@ def run_epoch(
         #
         #   For SBD targets, success is <= RMSE = 0.12g/cm^3:
         #
-        #     
+        #   * For success: sqrt(mean(y-x)^2) <= 0.12
+        #
+        #   Percent error and RMSE mean/STD are reported as well.
 
         total_loss += loss.item() * labels.size(0)
         preds = logits
 
+        # Recover targets and predictions from z-scores for use in evals.
         # NOTE: Use only the first soil layer for predictions (currently).
         z_hat = preds[:,0]
         z = labels[:,0]
         y = train_std * z_hat + train_mean
         x = train_std * z + train_mean
 
+        # Stats for nerds. Also evals.
+        errors_abs = abs(y - x)
+        errors_perc = errors_abs / x
+        errors_perc_mean = torch.mean(errors_perc)
+        errors_perc_std = torch.std(errors_perc)
+        errors_mse = torch.mean((y - x)**2)
+        errors_rmse = torch.sqrt(errors_mse)
+
         if (target == "spr"):
-            errors_abs = abs(y - x)
-            error_perc = errors_abs / x
-            total_correct += (error_perc <= spr_frac_e_max).sum().item()
+            # SPR score.
+            total_correct += (errors_perc <= spr_frac_e_max).sum().item()
         else:
-            # TODO(nubby):  Rationalize this metric; not sure if makes sense for
-            #               RMSE evaluation.
-            errors_rmse = torch.sqrt(torch.mean((y - x)**2))
+            # SBD score.
             total_correct += len(logits) if errors_rmse <= sbd_rmse_max else 0
 
         total_examples += labels.size(0)
@@ -188,7 +220,20 @@ def run_epoch(
 
     avg_loss = total_loss / max(1, total_examples)
     avg_acc = total_correct / max(1, total_examples)
-    return avg_loss, avg_acc, next_step
+
+    # Report statistics from epoch.
+    epoch_stats = EpochStats(
+            accuracy_mean=avg_acc,
+            loss_mean=avg_loss,
+            n_examples=total_examples,
+            mse=errors_mse,
+            percent_e_mean=errors_perc_mean,
+            percent_e_std=errors_perc_std,
+            rmse=errors_rmse,
+            target=target,
+        )
+
+    return epoch_stats, next_step
 
 
 def train_and_evaluate(
@@ -246,6 +291,8 @@ def train_and_evaluate(
 
     best_state = copy.deepcopy(model.state_dict())
     best_val_acc = 0.0
+    best_val_rmse = 0.0
+    best_val_percent_error = 0.0
     best_epoch = 0
     epochs_no_improve = 0
     global_step = 0
@@ -254,7 +301,7 @@ def train_and_evaluate(
         wandb_run.watch(model, log="gradients", log_freq=200)
 
     for epoch in range(1, config.epochs + 1):
-        train_loss, train_acc, global_step = run_epoch(
+        train_stats, global_step = run_epoch(
             model,
             train_loader,
             criterion,
@@ -271,7 +318,23 @@ def train_and_evaluate(
             wandb_run=wandb_run,
             wandb_prefix=model_name,
         )
-        val_loss, val_acc, _ = run_epoch(
+        # Unzip training stats.
+        (
+            train_loss,
+            train_acc,
+            train_rmse,
+            train_perc_e_mean,
+            train_perc_e_std
+        ) = (
+                train_stats.loss_mean,
+                train_stats.accuracy_mean,
+                train_stats.rmse,
+                train_stats.percent_e_mean,
+                train_stats.percent_e_std
+            )
+        
+        # Validate model.
+        val_stats, _ = run_epoch(
             model,
             val_loader,
             criterion,
@@ -282,15 +345,45 @@ def train_and_evaluate(
             train=False,
             split="val",
         )
+        # Unzip validation test stats.
+        val_loss, val_acc, val_rmse, val_perc_e_mean, val_perc_e_std = (
+                val_stats.loss_mean,
+                val_stats.accuracy_mean,
+                val_stats.rmse,
+                val_stats.percent_e_mean,
+                val_stats.percent_e_std
+            )
+        # TODO(nubby)
         scheduler.step(val_acc)
 
-        if val_acc > best_val_acc:
+        if (val_perc_e_mean > best_val_percent_error):
+            # Drop "mean" for ease of use.
+            best_val_percent_error = val_perc_e_mean
+            if (target == "spr"):
+                best_state = copy.deepcopy(model.state_dict())
+                best_epoch = epoch
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+        if (val_rmse > best_val_rmse):
+            best_val_rmse = val_rmse
+            if (target == "sbd"):
+                best_state = copy.deepcopy(model.state_dict())
+                best_epoch = epoch
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+        if (val_acc > best_val_acc):
+            best_val_acc = val_acc
+        """
+        if (val_acc > best_val_acc):
             best_val_acc = val_acc
             best_state = copy.deepcopy(model.state_dict())
             best_epoch = epoch
             epochs_no_improve = 0
         else:
             epochs_no_improve += 1
+        """
 
         history.epoch_indices.append(epoch)
         history.train_epoch_loss.append(train_loss)
@@ -300,8 +393,20 @@ def train_and_evaluate(
         history.learning_rates.append(optimizer.param_groups[0]["lr"])
 
         print(
-            f"Epoch {epoch:02d} | train_loss={train_loss:.4f} train_acc={train_acc:.3f} "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.3f} best_val_acc={best_val_acc:.3f}"
+            f"Epoch {epoch:02d} (Training) "
+            f"| train_loss={train_loss:.4f} "
+            f"train_acc={train_acc:.3f} "
+            f"train_rmse={train_rmse:.4f} "
+            f"train_perc_e_mean={train_perc_e_mean:.3f} "
+            f"train_perc_e_std={train_perc_e_std:.3f}\n"
+            f"Epoch {epoch:02d} (Val) "
+            f"| val_loss={val_loss:.4f} "
+            f"val_acc={val_acc:.3f} "
+            f"val_rmse={val_rmse:.4f} "
+            f"val_perc_e_mean={val_perc_e_mean:.3f} "
+            f"val_perc_e_std={val_perc_e_std:.3f} "
+            f"best_val_rmse={best_val_rmse:.3f} "
+            f"best_val_percent_error={best_val_percent_error:.3f}"
         )
 
         if wandb_run is not None:
@@ -324,7 +429,7 @@ def train_and_evaluate(
     model.load_state_dict(best_state)
     history.best_epoch = best_epoch
 
-    test_loss, test_acc, _ = run_epoch(
+    test_stats, _ = run_epoch(
         model,
         test_loader,
         criterion,
@@ -335,6 +440,15 @@ def train_and_evaluate(
         train=False,
         split="test",
     )
+    # Unzip test statistics.
+    test_loss, test_acc, test_rmse, test_perc_e_mean, test_perc_e_std = (
+            test_stats.loss_mean,
+            test_stats.accuracy_mean,
+            test_stats.rmse,
+            test_stats.percent_e_mean,
+            test_stats.percent_e_std
+        )
+    # TODO(nubby):  Expand history tracking of other metrics.
     history.test_loss = test_loss
     history.test_acc = test_acc
 
@@ -344,6 +458,9 @@ def train_and_evaluate(
                 f"{model_name}/best_val_acc": best_val_acc,
                 f"{model_name}/test_acc": test_acc,
                 f"{model_name}/test_loss": test_loss,
+                f"{model_name}/test_rmse": test_rmse,
+                f"{model_name}/test_perc_e_mean": test_perc_e_mean,
+                f"{model_name}/test_perc_e_std": test_perc_e_std,
                 f"{model_name}/best_epoch": best_epoch,
             },
             step=max(history.epoch_indices, default=0),
@@ -355,6 +472,9 @@ def train_and_evaluate(
             "test_acc": test_acc,
             "test_loss": test_loss,
             "best_epoch": best_epoch,
+            "test_rmse": test_rmse,
+            "test_perc_e_mean": test_perc_e_mean,
+            "test_perc_e_std": test_perc_e_std
         },
         history,
     )
@@ -516,11 +636,15 @@ def benchmark(
         )
     }
 
+    # Verify model selection is valid, then load them.
     unknown = set(models) - set(available_models.keys())
     if unknown:
-        raise ValueError(f"Unknown model names requested: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown model names requested: {', '.join(sorted(unknown))}"
+        )
     models = {name: available_models[name] for name in models}
 
+    # Summarize dataset.
     dataset_summary = {
         "train_samples": len(data_bundle.train),
         "val_samples": len(data_bundle.val),
@@ -595,7 +719,11 @@ def benchmark(
 
         print(
             f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
-            f"test_acc={outcomes['test_acc']:.3f} test_loss={outcomes['test_loss']:.4f} "
+            f"test_acc={outcomes['test_acc']:.3f} "
+            f"test_loss={outcomes['test_loss']:.4f} "
+            f"test_rmse={outcomes['test_rmse']:.3f} "
+            f"test_perc_error_mean={outcomes['test_perc_e_mean']:.4f} "
+            f"test_perc_error_std={outcomes['test_perc_e_std']:.4f} "
             f"(best_epoch={outcomes['best_epoch']})"
         )
 
@@ -606,7 +734,11 @@ def benchmark(
     for name, metrics in results.items():
         print(
             f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
-            f"| test_acc={metrics['test_acc']:.3f} | best_epoch={metrics['best_epoch']}"
+            f"| test_acc={metrics['test_acc']:.3f} "
+            f"| best_epoch={metrics['best_epoch']} "
+            f"| test_rmse={metrics['test_rmse']:.3f} "
+            f"| test_perc_e_mean={metrics['test_perc_e_mean']:.3f} "
+            f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
         )
         print(f"Artifacts saved to {output_dir / name}")
 
