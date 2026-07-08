@@ -292,8 +292,8 @@ def train_and_evaluate(
 
     best_state = copy.deepcopy(model.state_dict())
     best_val_acc = 0.0
-    best_val_rmse = 0.0
-    best_val_percent_error = 0.0
+    best_val_rmse = 100000.0            # Highest possible (and then some).
+    best_val_percent_error = 100.0      # Highest possible.
     best_epoch = 0
     epochs_no_improve = 0
     global_step = 0
@@ -358,7 +358,7 @@ def train_and_evaluate(
         scheduler.step(val_acc)
 
         # Evaluate model performance.
-        if (val_perc_e_mean > best_val_percent_error):
+        if (val_perc_e_mean < best_val_percent_error):
             # Evaluation for SPR (drop "mean" for ease of use).
             best_val_percent_error = val_perc_e_mean
             if not config.classic_mode:
