@@ -357,7 +357,9 @@ def train_and_evaluate(
         # TODO(nubby)
         scheduler.step(val_acc)
 
-        # Evaluate model performance.
+        # Evaluate model performance outside of loss.
+        # TODO(nubby):  Chat with some friends about minimizing loss versus
+        #               these weird evaluations.
         if (val_perc_e_mean < best_val_percent_error):
             # Evaluation for SPR (drop "mean" for ease of use).
             best_val_percent_error = val_perc_e_mean
