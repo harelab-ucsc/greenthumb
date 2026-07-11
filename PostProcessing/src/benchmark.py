@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    6 Jul 2026
+    9 Jul 2026
 
 Version:
-    1.1.0
+    1.1.1
 """
 from __future__ import annotations
 
@@ -32,10 +32,6 @@ import matplotlib.pyplot as plt
 
 import wandb
 
-"""
-from .data_pipeline import build_data_bundle
-from .models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
-"""
 from data_pipeline import build_data_bundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
@@ -44,31 +40,7 @@ from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 spr_frac_e_max = 0.11   # Fractional percentage of SPR for success.
 sbd_rmse_max = 0.03     # RMSE prediction threshold for success.
 
-@dataclass
-class TrainingConfig:
-    epochs: int = 30
-    batch_size: int = 32 
-    lr: float = 3e-4
-    weight_decay: float = 1e-3
-    patience: int = 30
-    grad_clip: float = 1.0
-    classic_mode: bool = False
-
-
-@dataclass
-class TrainingHistory:
-    epoch_indices: List[int] = field(default_factory=list)
-    train_epoch_loss: List[float] = field(default_factory=list)
-    train_epoch_acc: List[float] = field(default_factory=list)
-    val_epoch_loss: List[float] = field(default_factory=list)
-    val_epoch_acc: List[float] = field(default_factory=list)
-    learning_rates: List[float] = field(default_factory=list)
-    train_batch_loss: List[float] = field(default_factory=list)
-    train_batch_step: List[int] = field(default_factory=list)
-    best_epoch: Optional[int] = None
-    test_loss: Optional[float] = None
-    test_acc: Optional[float] = None
-
+# Dataclasses.
 @dataclass
 class EpochStats:
     """
@@ -94,7 +66,57 @@ class EpochStats:
     accuracy_std: float = 0
     loss_std: float = 0
 
-def set_seed(seed: int) -> None:
+@dataclass
+class TrainingConfig:
+    """
+    TrainingConfig
+    """
+    batch_size: int = 32 
+    classic_mode: bool = False
+    epochs: int = 30
+    grad_clip: float = 1.0
+    lr: float = 3e-4
+    no_cuda: bool
+    patience: int = 30
+    weight_decay: float = 1e-3
+
+@dataclass
+class TrainingHistory:
+    """
+    TrainingHistory
+    """
+    epoch_indices: List[int] = field(default_factory=list)
+    train_epoch_loss: List[float] = field(default_factory=list)
+    train_epoch_acc: List[float] = field(default_factory=list)
+    val_epoch_loss: List[float] = field(default_factory=list)
+    val_epoch_acc: List[float] = field(default_factory=list)
+    learning_rates: List[float] = field(default_factory=list)
+    train_batch_loss: List[float] = field(default_factory=list)
+    train_batch_step: List[int] = field(default_factory=list)
+    best_epoch: Optional[int] = None
+    test_loss: Optional[float] = None
+    test_acc: Optional[float] = None
+
+@dataclass
+class WandbConfig:
+    """
+    WandbConfig
+    """
+    use_wandb: bool
+    wandb_entity: str
+    wandb_group: str
+    wandb_mode: str
+    wandb_project: str
+    wandb_run_prefix: str
+
+
+# Functional stuff.
+def set_seed(seed: int):
+    """
+    set_seed(seed)
+
+    Random seed setting for data pipeline.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -102,6 +124,27 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def set_up(
+        no_cuda: bool,
+        output_dir: Path,
+        seed: int,
+    ) -> torch.device:
+    """
+    set_up(no_cuda, output_dir, seed) -> device
+    """
+    # Select device for training.
+    device = torch.device(
+            "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+        )
+    print(f"Using device: {device}")
+
+    # Set random seed.
+    set_seed(seed)
+
+    # Set up output directory.
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    return device
 
 def run_epoch(
         model: nn.Module,
@@ -561,60 +604,148 @@ def save_plots(history: TrainingHistory, output_dir: Path, model_name: str) -> N
             fig.savefig(model_dir / f"{model_name}_train_batch_loss.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
 
-def set_up(
-        no_cuda: bool,
-        output_dir: Path,
-        seed: int,
-        ) -> torch.device:
-    # Select device for training.
-    device = torch.device(
-            "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+def _configure_wandb(
+        dataset_summary: dict,
+        name: str,
+        param_count: int,
+        training_config: TrainingConfig,
+        wandb_config: WandbConfig
+    ):
+    """
+    _configure_wandb(...)
+    """
+    wandb_run = None
+    if wandb_config.use_wandb and wandb_config.wandb_mode != "disabled":
+        if wandb is None:
+            # Check if imported wandb lib is found.
+            raise RuntimeError(
+                "Weights & Biases is not installed. Install it with "
+                "'pip install wandb' to enable logging."
+            )
+        run_name = (f"{wandb_config.wandb_run_prefix}-"
+                    f"{name}-"
+                    f"seed{wandb_config.seed}")
+        run_config = {
+            **dataset_summary,
+            "epochs": training_config.epochs,
+            "batch_size": training_config.batch_size,
+            "lr": training_config.lr,
+            "weight_decay": training_config.weight_decay,
+            "patience": training_config.patience,
+            "model": name,
+            "params": param_count,
+        }
+        wandb_run = wandb.init(  # type: ignore[call-arg]
+            project=wandb_config.wandb_project,
+            entity=wandb_config.wandb_entity,
+            group=wandb_config.wandb_group,
+            name=run_name,
+            config=run_config,
+            mode=wandb_config.wandb_mode,
+            reinit=True,
         )
-    print(f"Using device: {device}")
 
-    # Set random seed.
-    set_seed(seed)
+    return wandb_run
 
-    # Set up output directory.
-    output_dir.mkdir(parents=True, exist_ok=True)
+def run_benchmark_model(
+        config: TrainingConfig,
+        dataset_summary: dict,
+        device: torch.device,
+        model: nn.Module,
+        name: str,
+        seed: int,
+        wandb_config: WandbConfig
+    ):
+    """
+    run_benchmark_model()
 
-    return device
+    Begin benchmark evaluations for a given model.
+    """
+    # Gather model parameters.
+    param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    layers = list(model.modules())
+    num_layers = len(layers)
 
-def benchmark(
-        batch_size: int,
-        classic_mode: bool,
+    print(f"\n=== Training {name.upper()} "
+          f"({param_count} params, "
+          f"{num_layers} layers) ===")
+
+    # Move model to device buffer.
+    model.to(device)
+
+    # Configure weights and biases.
+    wandb_run = _configure_wandb(
+            dataset_summary=dataset_summary,
+            device=device,
+            name=name,
+            param_count=param_count,
+            training_config=training_config,
+            wandb_config=wandb_config
+        )
+
+    # Run the prepped model through the pipeline.
+    outcomes, history = train_and_evaluate(
+            model,
+            data_bundle,
+            device,
+            training_config,
+            target=target,
+            train_mean=train_mean,
+            train_std=train_std,
+            model_name=name,
+            wandb_run=wandb_run,
+        )
+
+    # Save results.
+    results[name] = outcomes
+    histories[name] = history
+    save_history(history, output_dir, name)
+    save_plots(history, output_dir, name)
+
+    print(
+        f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
+        f"test_acc={outcomes['test_acc']:.3f} "
+        f"test_loss={outcomes['test_loss']:.4f} "
+        f"test_rmse={outcomes['test_rmse']:.3f} "
+        f"test_perc_error_mean={outcomes['test_perc_e_mean']:.4f} "
+        f"test_perc_error_std={outcomes['test_perc_e_std']:.4f} "
+        f"(best_epoch={outcomes['best_epoch']})"
+    )
+
+    if wandb_run is not None:
+        wandb_run.finish()
+    
+    return outcomes, history
+
+def _save(results, histories):
+    # TODO(nubby)
+    pass
+
+def run_benchmark(
         data_dir: str,
-        epochs: int,
-        lr: float,
         models: list[str],
-        no_cuda: bool,
         output_dir: Path,
-        patience: float,
         seed: int,
         stride: int,
         target: str,
-        use_wandb: bool,
-        wandb_entity: str,
-        wandb_group: str,
-        wandb_mode: str,
-        wandb_project: str,
-        wandb_run_prefix: str,
-        weight_decay: float,
+        training_config: TrainingConfig,
+        wandb_config: WandbConfig,
         window_size: int,
     ):
     """
-    benchmark(...)
+    run_benchmark(...)
 
-    Main training pipeline entry point.
+    Perform a single benchmark evaluation.
     """
-    # Set up device for training.
+    # Set up device for training with a different seed for each eval.
     device = set_up(
-            no_cuda=no_cuda,
+            no_cuda=training_config.no_cuda,
             output_dir=output_dir,
             seed=seed,
         )
 
-    # Create data bundle for train/val/test splits.
+    # Create data bundle for train/val/test splits for each trial (with
+    # different random seed for thoroughness).
     # TODO(nubby):  Further divide individual trials, either by a fixed size or
     #               by steps.
     data_bundle = build_data_bundle(
@@ -632,15 +763,7 @@ def benchmark(
     # Number of soil layers to predict (from the top layer down).
     soil_layers = 1
 
-    config = TrainingConfig(
-            batch_size=batch_size,
-            epochs=epochs,
-            lr=lr,
-            patience=patience,
-            weight_decay=weight_decay,
-            classic_mode=classic_mode
-        )
-
+    # Set up models.
     available_models = {
         "lstm": LSTMEstimator(input_dim=input_dim, num_classes=soil_layers),
         "tcn": TemporalConvNetEstimator(
@@ -685,68 +808,17 @@ def benchmark(
     results: Dict[str, Dict[str, float]] = {}
     histories: Dict[str, TrainingHistory] = {}
 
+    # Run each model through a round of the benchmark.
     for name, model in models.items():
-        param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        layers = list(model.modules())
-        num_layers = len(layers)
-        print(f"\n=== Training {name.upper()} ({param_count} params, {num_layers} layers) ===")
-        model.to(device)
-
-        wandb_run = None
-        if use_wandb and wandb_mode != "disabled":
-            if wandb is None:
-                raise RuntimeError(
-                    "Weights & Biases is not installed. Install it with 'pip install wandb' to enable logging."
+        try:
+            results, histories = run_benchmark_model(
+                    dataset_summary=dataset_summary,
+                    training_config=training_config,
+                    wandb_config=wandb_config
                 )
-            run_name = f"{wandb_run_prefix}-{name}-seed{seed}"
-            run_config = {
-                **dataset_summary,
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "lr": lr,
-                "weight_decay": weight_decay,
-                "patience": patience,
-                "model": name,
-                "params": param_count,
-            }
-            wandb_run = wandb.init(  # type: ignore[call-arg]
-                project=wandb_project,
-                entity=wandb_entity,
-                group=wandb_group,
-                name=run_name,
-                config=run_config,
-                mode=wandb_mode,
-                reinit=True,
-            )
-
-        outcomes, history = train_and_evaluate(
-            model,
-            data_bundle,
-            device,
-            config,
-            target=target,
-            train_mean=train_mean,
-            train_std=train_std,
-            model_name=name,
-            wandb_run=wandb_run,
-        )
-        results[name] = outcomes
-        histories[name] = history
-        save_history(history, output_dir, name)
-        save_plots(history, output_dir, name)
-
-        print(
-            f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
-            f"test_acc={outcomes['test_acc']:.3f} "
-            f"test_loss={outcomes['test_loss']:.4f} "
-            f"test_rmse={outcomes['test_rmse']:.3f} "
-            f"test_perc_error_mean={outcomes['test_perc_e_mean']:.4f} "
-            f"test_perc_error_std={outcomes['test_perc_e_std']:.4f} "
-            f"(best_epoch={outcomes['best_epoch']})"
-        )
-
-        if wandb_run is not None:
-            wandb_run.finish()
+        finally:
+            # Always save results.
+            _save(results, histories)
 
     print("\n=== Summary ===")
     for name, metrics in results.items():
@@ -759,6 +831,75 @@ def benchmark(
             f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
         )
         print(f"Artifacts saved to {output_dir / name}")
+
+def benchmark(
+        batch_size: int,
+        classic_mode: bool,
+        data_dir: str,
+        epochs: int,
+        lr: float,
+        models: list[str],
+        n_evals: int,
+        no_cuda: bool,
+        output_dir: Path,
+        patience: float,
+        seed: int,
+        stride: int,
+        target: str,
+        use_wandb: bool,
+        wandb_entity: str,
+        wandb_group: str,
+        wandb_mode: str,
+        wandb_project: str,
+        wandb_run_prefix: str,
+        weight_decay: float,
+        window_size: int,
+        verbose: bool = False
+    ):
+    """
+    benchmark(...)
+
+    Main training pipeline entry point. Perform benchmark evaluations with
+    different seeds to generate useful run statistics.
+    """
+    # Create configs that do not change between runs.
+    wandb_config = WandbConfig(
+            use_wandb=use_wandb,
+            wandb_entity=wandb_entity,
+            wandb_group=wandb_group
+            wandb_mode=wandb_mode
+            wandb_project=wandb_project
+            wandb_run_prefix=wandb_run_prefix
+        )
+    training_config = TrainingConfig(
+            batch_size=batch_size,
+            epochs=epochs,
+            lr=lr,
+            no_cuda=no_cuda,
+            patience=patience,
+            weight_decay=weight_decay,
+            classic_mode=classic_mode
+        )
+
+    for i in range(n_evals):
+        # Each benchmark iteration, only change the seed programmatically.
+        run_benchmark(
+            data_dir=data_dir,
+            models=models,
+            output_dir=output_dir,
+            seed=seed+i,
+            stride=stride,
+            target=target,
+            training_config=training_config,
+            wandb_config=wandb_config,
+            window_size=window_size,
+        )
+
+    print(
+            f"Completed {n_evals} tests. Goodbye."
+        ) if not verbose else print(
+            f"Bye nub."
+        )
 
 
 if __name__ == "__main__":
@@ -891,6 +1032,12 @@ if __name__ == "__main__":
                   "mean (for SPR) in standard mode.")
 
         )
+    parser.add_argument(
+            "-n",
+            type=int,
+            default=1,
+            help=("Number of benchmark iterations to run.")
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -912,6 +1059,7 @@ if __name__ == "__main__":
             epochs=args.epochs,
             lr=args.lr,
             models=args.models,
+            n_evals=args.n,
             no_cuda=args.no_cuda,
             output_dir=args.output_dir,
             patience=args.patience,
