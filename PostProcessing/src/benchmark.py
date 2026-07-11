@@ -866,9 +866,9 @@ def benchmark(
     wandb_config = WandbConfig(
             use_wandb=use_wandb,
             wandb_entity=wandb_entity,
-            wandb_group=wandb_group
-            wandb_mode=wandb_mode
-            wandb_project=wandb_project
+            wandb_group=wandb_group,
+            wandb_mode=wandb_mode,
+            wandb_project=wandb_project,
             wandb_run_prefix=wandb_run_prefix
         )
     training_config = TrainingConfig(
