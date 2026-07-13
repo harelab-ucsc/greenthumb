@@ -63,8 +63,8 @@ class EpochStats:
     percent_e_std: float
     rmse: float
     target: str
-    accuracy_std: float = 0
-    loss_std: float = 0
+    accuracy_std: float = 0.0
+    loss_std: float = 0.0
 
 @dataclass
 class TrainingConfig:
