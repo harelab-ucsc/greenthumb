@@ -660,8 +660,10 @@ def run_benchmark_model(
         data_bundle: FullDataBundle,
         dataset_summary: dict,
         device: torch.device,
+        histories: Dict[str, TrainingHistory],
         model: nn.Module,
         name: str,
+        results: Dict[str, Dict[str, float]],
         seed: int,
         training_config: TrainingConfig,
         wandb_config: WandbConfig
@@ -840,6 +842,7 @@ def run_benchmark(
         f"stride: {dataset_summary['stride']}"
     )
 
+    # Initialize bulk results/histories here, then pass with evals.
     results: Dict[str, Dict[str, float]] = {}
     histories: Dict[str, TrainingHistory] = {}
 
@@ -850,8 +853,10 @@ def run_benchmark(
                 data_bundle=data_bundle,
                 dataset_summary=dataset_summary,
                 device=device,
+                histories=histories,
                 model=model,
                 name=name,
+                results=results,
                 seed=seed,
                 training_config=training_config,
                 wandb_config=wandb_config
