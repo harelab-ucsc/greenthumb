@@ -26,14 +26,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import wandb
 
 from data_pipeline import build_data_bundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
+
+# Library configs.
+matplotlib.use("Agg")
+logger = logging.getLogger("greenthumb")
 
 
 # Useful macros/global variables.
@@ -71,12 +73,12 @@ class TrainingConfig:
     """
     TrainingConfig
     """
+    no_cuda: bool
     batch_size: int = 32 
     classic_mode: bool = False
     epochs: int = 30
     grad_clip: float = 1.0
     lr: float = 3e-4
-    no_cuda: bool
     patience: int = 30
     weight_decay: float = 1e-3
 
@@ -136,7 +138,7 @@ def set_up(
     device = torch.device(
             "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
         )
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
 
     # Set random seed.
     set_seed(seed)
@@ -717,9 +719,37 @@ def run_benchmark_model(
     
     return outcomes, history
 
-def _save(results, histories):
-    # TODO(nubby)
-    pass
+def _print_results(results: dict):
+    """
+    _print_results(results)
+    """
+    logger.info("\n=== Summary ===")
+    for name, metrics in results.items():
+        logger.info(
+            f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
+            f"| test_acc={metrics['test_acc']:.3f} "
+            f"| best_epoch={metrics['best_epoch']} "
+            f"| test_rmse={metrics['test_rmse']:.3f} "
+            f"| test_perc_e_mean={metrics['test_perc_e_mean']:.3f} "
+            f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
+        )
+        logger.info(f"Artifacts saved to {output_dir / name}")
+
+def _save_results(results: dict, output_dir: str):
+    """
+    _save_results(results, output_path)
+    """
+    print(results)
+    exit()
+
+def _report_model_results(results: dict, output_dir: str):
+    """
+    _report_model_results(results)
+
+    Print and save model outputs.
+    """
+    _print_results(results=results)
+    _save_results(results=results, output_dir=output_dir)
 
 def run_benchmark(
         data_dir: str,
@@ -795,7 +825,7 @@ def run_benchmark(
         "stride": stride,
     }
 
-    print(
+    logger.info(
         "Dataset sequences -> "
         f"train: {dataset_summary['train_samples']}, "
         f"val: {dataset_summary['val_samples']}, "
@@ -817,20 +847,8 @@ def run_benchmark(
                     wandb_config=wandb_config
                 )
         finally:
-            # Always save results.
-            _save(results, histories)
-
-    print("\n=== Summary ===")
-    for name, metrics in results.items():
-        print(
-            f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
-            f"| test_acc={metrics['test_acc']:.3f} "
-            f"| best_epoch={metrics['best_epoch']} "
-            f"| test_rmse={metrics['test_rmse']:.3f} "
-            f"| test_perc_e_mean={metrics['test_perc_e_mean']:.3f} "
-            f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
-        )
-        print(f"Artifacts saved to {output_dir / name}")
+            # Always print and save results per evaluation.
+            _report_model_results(results=results, output_dir=output_dir)
 
 def benchmark(
         batch_size: int,
@@ -873,12 +891,12 @@ def benchmark(
         )
     training_config = TrainingConfig(
             batch_size=batch_size,
+            classic_mode=classic_mode,
             epochs=epochs,
             lr=lr,
             no_cuda=no_cuda,
             patience=patience,
-            weight_decay=weight_decay,
-            classic_mode=classic_mode
+            weight_decay=weight_decay
         )
 
     for i in range(n_evals):
@@ -895,10 +913,9 @@ def benchmark(
             window_size=window_size,
         )
 
-    print(
-            f"Completed {n_evals} tests. Goodbye."
-        ) if not verbose else print(
-            f"Bye nub."
+    logger.info(
+            (f"Completed {n_evals} tests. Goodbye.") if not verbose else 
+            (f"Bye nub.")
         )
 
 
