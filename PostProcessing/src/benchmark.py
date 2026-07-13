@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 
 import wandb
 
-from data_pipeline import build_data_bundle
+from data_pipeline import build_data_bundle, FullDataBundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
 # Library configs.
@@ -72,14 +72,23 @@ class EpochStats:
 class TrainingConfig:
     """
     TrainingConfig
+
+    Args:
+        ...
+        train_mean  (float) Initialize to 0, but must be set elsewhere.
+        train_std   (float) Initialize to 0, but must be set elsewhere.
+        ...
     """
     no_cuda: bool
+    target: str
     batch_size: int = 32 
     classic_mode: bool = False
     epochs: int = 30
     grad_clip: float = 1.0
     lr: float = 3e-4
     patience: int = 30
+    train_mean: float = 0.0
+    train_std: float = 0.0
     weight_decay: float = 1e-3
 
 @dataclass
@@ -284,14 +293,12 @@ def run_epoch(
 
 def train_and_evaluate(
         model: nn.Module,
-        bundle,
+        data_bundle: FullDataBundle,
         device: torch.device,
-        config: TrainingConfig,
+        training_config: TrainingConfig,
         *,
         model_name: str,
         target: str,
-        train_mean: float,
-        train_std: float,
         wandb_run: Optional[object] = None,
     ) -> Tuple[Dict[str, float], TrainingHistory]:
     """
@@ -303,23 +310,23 @@ def train_and_evaluate(
         },
         history
     """
-    train_loader = bundle.dataloader(
-            batch_size=config.batch_size,
+    train_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
             split="train",
         )
-    val_loader = bundle.dataloader(
-            batch_size=config.batch_size,
+    val_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
             split="val",
         )
-    test_loader = bundle.dataloader(
-            batch_size=config.batch_size,
+    test_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
             split="test",
         )
 
     optimizer = torch.optim.AdamW(
             model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay
+            lr=training_config.lr,
+            weight_decay=training_config.weight_decay
         )
     #criterion = nn.CrossEntropyLoss()
     criterion = nn.MSELoss()
@@ -346,18 +353,18 @@ def train_and_evaluate(
     if wandb_run is not None:
         wandb_run.watch(model, log="gradients", log_freq=200)
 
-    for epoch in range(1, config.epochs + 1):
+    for epoch in range(1, training_config.epochs + 1):
         train_stats, global_step = run_epoch(
             model,
             train_loader,
             criterion,
             device,
             target=target,
-            train_mean=train_mean,
-            train_std=train_std,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
             train=True,
             optimizer=optimizer,
-            grad_clip=config.grad_clip,
+            grad_clip=training_config.grad_clip,
             history=history,
             split="train",
             global_step=global_step,
@@ -386,8 +393,8 @@ def train_and_evaluate(
             criterion,
             device,
             target=target,
-            train_mean=train_mean,
-            train_std=train_std,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
             train=False,
             split="val",
         )
@@ -408,7 +415,7 @@ def train_and_evaluate(
         if (val_perc_e_mean < best_val_percent_error):
             # Evaluation for SPR (drop "mean" for ease of use).
             best_val_percent_error = val_perc_e_mean
-            if not config.classic_mode:
+            if not training_config.classic_mode:
                 if (target == "spr"):
                     best_state = copy.deepcopy(model.state_dict())
                     best_epoch = epoch
@@ -419,7 +426,7 @@ def train_and_evaluate(
         if (val_rmse < best_val_rmse):
             # Evaluation for SBD.
             best_val_rmse = val_rmse
-            if not config.classic_mode:
+            if not training_config.classic_mode:
                 if (target == "sbd"):
                     best_state = copy.deepcopy(model.state_dict())
                     best_epoch = epoch
@@ -430,7 +437,7 @@ def train_and_evaluate(
         if (val_acc > best_val_acc):
             # Evaluation for classic mode.
             best_val_acc = val_acc
-            if config.classic_mode:
+            if training_config.classic_mode:
                 best_state = copy.deepcopy(model.state_dict())
                 best_epoch = epoch
                 epochs_no_improve = 0
@@ -453,7 +460,7 @@ def train_and_evaluate(
         history.val_epoch_acc.append(val_acc)
         history.learning_rates.append(optimizer.param_groups[0]["lr"])
 
-        print(
+        logger.info(
             f"Epoch {epoch:02d} (Train)\t"
             f"| train_loss={train_loss:.4f} "
             f"train_acc={train_acc:.3f} "
@@ -483,8 +490,8 @@ def train_and_evaluate(
                 step=epoch,
             )
 
-        if epochs_no_improve >= config.patience:
-            print("Early stopping triggered.")
+        if epochs_no_improve >= training_config.patience:
+            logger.info("Early stopping triggered.")
             break
 
     model.load_state_dict(best_state)
@@ -496,8 +503,8 @@ def train_and_evaluate(
         criterion,
         device,
         target=target,
-        train_mean=train_mean,
-        train_std=train_std,
+        train_mean=training_config.train_mean,
+        train_std=training_config.train_std,
         train=False,
         split="test",
     )
@@ -650,12 +657,13 @@ def _configure_wandb(
     return wandb_run
 
 def run_benchmark_model(
-        config: TrainingConfig,
+        data_bundle: FullDataBundle,
         dataset_summary: dict,
         device: torch.device,
         model: nn.Module,
         name: str,
         seed: int,
+        training_config: TrainingConfig,
         wandb_config: WandbConfig
     ):
     """
@@ -668,9 +676,9 @@ def run_benchmark_model(
     layers = list(model.modules())
     num_layers = len(layers)
 
-    print(f"\n=== Training {name.upper()} "
-          f"({param_count} params, "
-          f"{num_layers} layers) ===")
+    logger.info(f"\n=== Training {name.upper()} "
+                f"({param_count} params, "
+                f"{num_layers} layers) ===")
 
     # Move model to device buffer.
     model.to(device)
@@ -678,7 +686,6 @@ def run_benchmark_model(
     # Configure weights and biases.
     wandb_run = _configure_wandb(
             dataset_summary=dataset_summary,
-            device=device,
             name=name,
             param_count=param_count,
             training_config=training_config,
@@ -687,14 +694,12 @@ def run_benchmark_model(
 
     # Run the prepped model through the pipeline.
     outcomes, history = train_and_evaluate(
-            model,
-            data_bundle,
-            device,
-            training_config,
-            target=target,
-            train_mean=train_mean,
-            train_std=train_std,
+            model=model,
+            data_bundle=data_bundle,
+            device=device,
             model_name=name,
+            training_config=training_config,
+            target=training_config.target,
             wandb_run=wandb_run,
         )
 
@@ -704,7 +709,7 @@ def run_benchmark_model(
     save_history(history, output_dir, name)
     save_plots(history, output_dir, name)
 
-    print(
+    logger.info(
         f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
         f"test_acc={outcomes['test_acc']:.3f} "
         f"test_loss={outcomes['test_loss']:.4f} "
@@ -786,8 +791,8 @@ def run_benchmark(
             window_size=window_size
         )
     # Extract mean/STD from training set for later use.
-    train_mean = data_bundle.train_mean
-    train_std = data_bundle.train_std
+    training_config.train_mean = data_bundle.train_mean
+    training_config.train_std = data_bundle.train_std
 
     input_dim = len(data_bundle.feature_names)
     # Number of soil layers to predict (from the top layer down).
@@ -840,15 +845,20 @@ def run_benchmark(
 
     # Run each model through a round of the benchmark.
     for name, model in models.items():
-        try:
-            results, histories = run_benchmark_model(
-                    dataset_summary=dataset_summary,
-                    training_config=training_config,
-                    wandb_config=wandb_config
-                )
-        finally:
-            # Always print and save results per evaluation.
-            _report_model_results(results=results, output_dir=output_dir)
+        #try:
+        results, histories = run_benchmark_model(
+                data_bundle=data_bundle,
+                dataset_summary=dataset_summary,
+                device=device,
+                model=model,
+                name=name,
+                seed=seed,
+                training_config=training_config,
+                wandb_config=wandb_config
+            )
+        #finally:
+        # Always print and save results per evaluation.
+        _report_model_results(results=results, output_dir=output_dir)
 
 def benchmark(
         batch_size: int,
@@ -896,6 +906,7 @@ def benchmark(
             lr=lr,
             no_cuda=no_cuda,
             patience=patience,
+            target=target,
             weight_decay=weight_decay
         )
 
@@ -920,6 +931,9 @@ def benchmark(
 
 
 if __name__ == "__main__":
+    # Logger setup.
+    logging.basicConfig(level=logging.INFO)
+
     # Arg parsing.
     parser = argparse.ArgumentParser(
             description="Benchmark sequence models on DyRET terrain dataset."
