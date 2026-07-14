@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timezone
 import logging
-import random
 import json
+import os
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -281,10 +283,10 @@ def run_epoch(
             accuracy_mean=avg_acc,
             loss_mean=avg_loss,
             n_examples=total_examples,
-            mse=errors_mse,
-            percent_e_mean=errors_perc_mean,
-            percent_e_std=errors_perc_std,
-            rmse=errors_rmse,
+            mse=errors_mse.item(),
+            percent_e_mean=errors_perc_mean.item(),
+            percent_e_std=errors_perc_std.item(),
+            rmse=errors_rmse.item(),
             target=target,
         )
 
@@ -498,16 +500,16 @@ def train_and_evaluate(
     history.best_epoch = best_epoch
 
     test_stats, _ = run_epoch(
-        model,
-        test_loader,
-        criterion,
-        device,
-        target=target,
-        train_mean=training_config.train_mean,
-        train_std=training_config.train_std,
-        train=False,
-        split="test",
-    )
+            model,
+            test_loader,
+            criterion,
+            device,
+            target=target,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
+            train=False,
+            split="test",
+        )
     # Unzip test statistics.
     test_loss, test_acc, test_rmse, test_perc_e_mean, test_perc_e_std = (
             test_stats.loss_mean,
@@ -686,24 +688,83 @@ def _print_model_results(model_results: Dict[str, float], name: str, seed: int):
 
 def _save_model_results(
         model_results: Dict[str, float],
-        output_dir: Path,
         name: str,
-        seed: int
+        output_dir: Path,
+        seed: int,
+        training_config: TrainingConfig
     ):
     """
-    _save_model_results(model_results, output_path)
+    _save_model_results(model_results, name, output_dir, training_config)
     """
     logger.info(
             f"Saving results for {name} (seed={seed}) to {output_dir}."
         )
-    pass
+    path = output_dir / "results.csv"
+    now = datetime.now(timezone.utc)
+
+    # If the results file and/or directory do not yet exist, add/create them.
+    if not output_dir.is_dir():
+        os.makedirs(output_dir)
+
+    if not path.exists():
+        line = ",".join([
+                "Timestamp",
+                "ModelName",
+                "Seed",
+                "BestValidationAccuracy",
+                "TestAccuracy",
+                "TestLoss",
+                "TestRMSE",
+                "TestPercentErrorMean",
+                "TestPercentErrorSTD",
+                "BestEpochNumber",
+                "Target",
+                "BatchSize",
+                "UseClassicMode",
+                "NumEpochs",
+                "GradClip",
+                "LearningRate",
+                "Patience",
+                "TrainingMean",
+                "TrainingSTD",
+                "WeightDecay"
+            ]) + "\n"
+        with open(path, "a+") as rp:
+            rp.write(line)
+
+    line = ",".join([
+            now.strftime("%Y%m%d_%H%M%S"),
+            name,
+            str(seed),
+            str(model_results["best_val_acc"]),
+            str(model_results["test_acc"]),
+            str(model_results["test_loss"]),
+            str(model_results["test_rmse"]),
+            str(model_results["test_perc_e_mean"]),
+            str(model_results["test_perc_e_std"]),
+            str(model_results["best_epoch"]),
+            training_config.target,
+            str(training_config.batch_size),
+            str(training_config.classic_mode),
+            str(training_config.epochs),
+            str(training_config.grad_clip),
+            str(training_config.lr),
+            str(training_config.patience),
+            str(training_config.train_mean),
+            str(training_config.train_std),
+            str(training_config.weight_decay)
+        ]) + "\n"
+    with open(path, "a+") as rp:
+        rp.write(line)
+
 
 def _report_model_results(
         model_history: TrainingHistory,
         model_results: Dict[str, float],
         name: str,
         output_dir: Path,
-        seed: int
+        seed: int,
+        training_config: TrainingConfig
     ):
     """
     _report_model_results(results)
@@ -715,7 +776,8 @@ def _report_model_results(
             model_results=model_results,
             output_dir=output_dir,
             name=name,
-            seed=seed
+            seed=seed,
+            training_config=training_config
         )
 
     # TODO:
@@ -780,7 +842,8 @@ def run_benchmark_model(
             model_results=outcomes,
             name=name,
             output_dir=output_dir,
-            seed=seed
+            seed=seed,
+            training_config=training_config
         )
 
     if wandb_run is not None:
