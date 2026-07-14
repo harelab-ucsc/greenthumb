@@ -6,18 +6,20 @@ Author:
     Taylor Kergan
 
 Date:
-    30 Jun 2026
+    14 Jul 2026
 
 Version:
-    1.0.1
+    1.2.0
 """
 from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timezone
 import logging
-import random
 import json
+import os
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -26,34 +28,76 @@ import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import wandb
 
-"""
-from .data_pipeline import build_data_bundle
-from .models import LSTMClassifier, TemporalConvNetClassifier, TransformerClassifier
-"""
-from data_pipeline import build_data_bundle
-from models import LSTMClassifier, TemporalConvNetClassifier, TransformerClassifier
+from data_pipeline import build_data_bundle, FullDataBundle
+from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
+
+# Library configs.
+matplotlib.use("Agg")
+logger = logging.getLogger("greenthumb")
 
 
-spr_max = 1000
+# Useful macros/global variables.
+spr_frac_e_max = 0.11   # Fractional percentage of SPR for success.
+sbd_rmse_max = 0.03     # RMSE prediction threshold for success.
+
+# Dataclasses.
+@dataclass
+class EpochStats:
+    """
+    EpochStats
+
+    Statistics about the performance of a split for a given target. Unless
+    otherwise indicated, these statistics refer to "true" targets, as opposed
+    to normalized targets.
+
+    Args:
+        ...
+        n_preds (int)   Number of predictions made (per timestep).
+        ...
+    """
+    accuracy_mean: float
+    loss_mean: float
+    mse: float
+    n_examples: int
+    percent_e_mean: float
+    percent_e_std: float
+    rmse: float
+    target: str
+    accuracy_std: float = 0.0
+    loss_std: float = 0.0
 
 @dataclass
 class TrainingConfig:
-    epochs: int = 30
-    batch_size: int = 32 
-    lr: float = 3e-4
-    weight_decay: float = 1e-3
-    patience: int = 30
-    grad_clip: float = 1.0
+    """
+    TrainingConfig
 
+    Args:
+        ...
+        train_mean  (float) Initialize to 0, but must be set elsewhere.
+        train_std   (float) Initialize to 0, but must be set elsewhere.
+        ...
+    """
+    no_cuda: bool
+    target: str
+    batch_size: int = 32 
+    classic_mode: bool = False
+    epochs: int = 30
+    grad_clip: float = 1.0
+    lr: float = 3e-4
+    patience: int = 30
+    train_mean: float = 0.0
+    train_std: float = 0.0
+    weight_decay: float = 1e-3
 
 @dataclass
 class TrainingHistory:
+    """
+    TrainingHistory
+    """
     epoch_indices: List[int] = field(default_factory=list)
     train_epoch_loss: List[float] = field(default_factory=list)
     train_epoch_acc: List[float] = field(default_factory=list)
@@ -66,8 +110,26 @@ class TrainingHistory:
     test_loss: Optional[float] = None
     test_acc: Optional[float] = None
 
+@dataclass
+class WandbConfig:
+    """
+    WandbConfig
+    """
+    use_wandb: bool
+    wandb_entity: str
+    wandb_group: str
+    wandb_mode: str
+    wandb_project: str
+    wandb_run_prefix: str
 
-def set_seed(seed: int) -> None:
+
+# Functional stuff.
+def set_seed(seed: int):
+    """
+    set_seed(seed)
+
+    Random seed setting for data pipeline.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -75,25 +137,61 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def set_up(
+        no_cuda: bool,
+        output_dir: Path,
+        seed: int,
+    ) -> torch.device:
+    """
+    set_up(no_cuda, output_dir, seed) -> device
+    """
+    # Select device for training.
+    device = torch.device(
+            "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+        )
+    logger.info(f"Using device: {device}")
+
+    # Set random seed.
+    set_seed(seed)
+
+    # Set up output directory.
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    return device
 
 def run_epoch(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    criterion: nn.Module,
-    device: torch.device,
-    *,
-    train: bool,
-    optimizer: torch.optim.Optimizer | None = None,
-    grad_clip: float = 1.0,
-    history: Optional[TrainingHistory] = None,
-    split: str = "train",
-    global_step: int = 0,
-    wandb_run: Optional[object] = None,
-    wandb_prefix: str = "",
-) -> Tuple[float, float, int]:
-    """Runs a single training or evaluation epoch and logs batch metrics if requested."""
-    #spr_thresh = 30  # 30 PSI of absolute error is acceptable.
-    spr_thresh = 30 / spr_max  # 30 PSI of absolute error is acceptable.
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        criterion: nn.Module,
+        device: torch.device,
+        target: str,
+        train_mean: Tuple[float],
+        train_std: Tuple[float],
+        *,
+        train: bool,
+        optimizer: torch.optim.Optimizer | None = None,
+        grad_clip: float = 1.0,
+        history: Optional[TrainingHistory] = None,
+        split: str = "train",
+        global_step: int = 0,
+        wandb_run: Optional[object] = None,
+        wandb_prefix: str = "",
+    ) -> Tuple[EpochStats, int]:
+    """
+    run_epoch(...) -> (epoch_stats, idx_next_step)
+
+    Runs a single training or evaluation epoch and logs batch metrics if
+    requested.
+
+    Args:
+        ...
+        target      (str)           [spr, sbd]
+        train_mean  (Tuple[float])  Mean values for each layer for success
+                                    criteria evaluation.
+        train_std   (Tuple[float])  STD of values for each layer for success
+                                    criteria evaluation.
+        ...
+    """
     if train:
         if optimizer is None:
             raise ValueError("Optimizer must be provided when train=True.")
@@ -133,36 +231,105 @@ def run_epoch(
                     {f"{wandb_prefix}/train_batch_loss": loss.item()},
                     step=step_id,
                 )
+        # NOTE: Derivation of success criteria below:
+        #
+        #   For SPR targets, success is within 11% of real value:
+        #
+        #   z = (x-m)/std -> x  = std*z +m
+        #                    x^ = std*z^+m
+        #   * For success: abs((x-x^)/x) <= 0.11, where
+        #       in which z = normalized label, z^ = predicted value,
+        #       x = true label, and x^ = predicted label.
+        #
+        #   For SBD targets, success is <= RMSE = 0.12g/cm^3:
+        #
+        #   * For success: sqrt(mean(y-x)^2) <= 0.12
+        #
+        #   Percent error and RMSE mean/STD are reported as well.
 
         total_loss += loss.item() * labels.size(0)
         preds = logits
-        #errors_abs = abs(preds - logits)
-        # Use only the first layer of SPRs for predictions.
-        errors_abs = abs(preds[:,0] - labels[:,0])
 
-        total_correct += (errors_abs <= spr_thresh).sum().item()
-        total_examples += labels.size(0) * 3
+        # Recover targets and predictions from z-scores for use in evals.
+        # NOTE: Use only the first soil layer for predictions (currently).
+        z_hat = preds[:,0]
+        z = labels[:,0]
+        y = train_std * z_hat + train_mean
+        x = train_std * z + train_mean
+
+        # Stats for nerds. Also evals.
+        errors_abs = abs(y - x)
+        errors_perc = errors_abs / x
+        errors_perc_mean = torch.mean(errors_perc)
+        errors_perc_std = torch.std(errors_perc)
+        errors_mse = torch.mean((y - x)**2)
+        errors_rmse = torch.sqrt(errors_mse)
+
+        if (target == "spr"):
+            # SPR score.
+            total_correct += (errors_perc <= spr_frac_e_max).sum().item()
+        else:
+            # SBD score.
+            total_correct += len(logits) if errors_rmse <= sbd_rmse_max else 0
+
+        total_examples += labels.size(0)
         next_step = step_id + 1
 
     avg_loss = total_loss / max(1, total_examples)
     avg_acc = total_correct / max(1, total_examples)
-    return avg_loss, avg_acc, next_step
+
+    # Report statistics from epoch.
+    epoch_stats = EpochStats(
+            accuracy_mean=avg_acc,
+            loss_mean=avg_loss,
+            n_examples=total_examples,
+            mse=errors_mse.item(),
+            percent_e_mean=errors_perc_mean.item(),
+            percent_e_std=errors_perc_std.item(),
+            rmse=errors_rmse.item(),
+            target=target,
+        )
+
+    return epoch_stats, next_step
 
 
 def train_and_evaluate(
-    model: nn.Module,
-    bundle,
-    device: torch.device,
-    config: TrainingConfig,
-    *,
-    model_name: str,
-    wandb_run: Optional[object] = None,
-) -> Tuple[Dict[str, float], TrainingHistory]:
-    train_loader = bundle.dataloader("train", batch_size=config.batch_size)
-    val_loader = bundle.dataloader("val", batch_size=config.batch_size)
-    test_loader = bundle.dataloader("test", batch_size=config.batch_size)
+        model: nn.Module,
+        data_bundle: FullDataBundle,
+        device: torch.device,
+        training_config: TrainingConfig,
+        *,
+        model_name: str,
+        target: str,
+        wandb_run: Optional[object] = None,
+    ) -> Tuple[Dict[str, float], TrainingHistory]:
+    """
+    train_and_evaluate(...) -> {
+            "best_val_acc": best_val_acc,
+            "test_acc": test_acc,
+            "test_loss": test_loss,
+            "best_epoch": best_epoch,
+        },
+        history
+    """
+    train_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
+            split="train",
+        )
+    val_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
+            split="val",
+        )
+    test_loader = data_bundle.dataloader(
+            batch_size=training_config.batch_size,
+            split="test",
+        )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=training_config.lr,
+            weight_decay=training_config.weight_decay
+        )
     #criterion = nn.CrossEntropyLoss()
     criterion = nn.MSELoss()
     #criterion = nn.SmoothL1Loss()
@@ -179,6 +346,8 @@ def train_and_evaluate(
 
     best_state = copy.deepcopy(model.state_dict())
     best_val_acc = 0.0
+    best_val_rmse = 100000.0            # Highest possible (and then some).
+    best_val_percent_error = 100.0      # Highest possible.
     best_epoch = 0
     epochs_no_improve = 0
     global_step = 0
@@ -186,38 +355,105 @@ def train_and_evaluate(
     if wandb_run is not None:
         wandb_run.watch(model, log="gradients", log_freq=200)
 
-    for epoch in range(1, config.epochs + 1):
-        train_loss, train_acc, global_step = run_epoch(
+    for epoch in range(1, training_config.epochs + 1):
+        train_stats, global_step = run_epoch(
             model,
             train_loader,
             criterion,
             device,
+            target=target,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
             train=True,
             optimizer=optimizer,
-            grad_clip=config.grad_clip,
+            grad_clip=training_config.grad_clip,
             history=history,
             split="train",
             global_step=global_step,
             wandb_run=wandb_run,
             wandb_prefix=model_name,
         )
-        val_loss, val_acc, _ = run_epoch(
+        # Unzip training stats.
+        (
+            train_loss,
+            train_acc,
+            train_rmse,
+            train_perc_e_mean,
+            train_perc_e_std
+        ) = (
+                train_stats.loss_mean,
+                train_stats.accuracy_mean,
+                train_stats.rmse,
+                train_stats.percent_e_mean,
+                train_stats.percent_e_std
+            )
+        
+        # Validate model.
+        val_stats, _ = run_epoch(
             model,
             val_loader,
             criterion,
             device,
+            target=target,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
             train=False,
             split="val",
         )
+        # Unzip validation test stats.
+        val_loss, val_acc, val_rmse, val_perc_e_mean, val_perc_e_std = (
+                val_stats.loss_mean,
+                val_stats.accuracy_mean,
+                val_stats.rmse,
+                val_stats.percent_e_mean,
+                val_stats.percent_e_std
+            )
+        # TODO(nubby)
         scheduler.step(val_acc)
 
-        if val_acc > best_val_acc:
+        # Evaluate model performance outside of loss.
+        # TODO(nubby):  Chat with some friends about minimizing loss versus
+        #               these weird evaluations.
+        if (val_perc_e_mean < best_val_percent_error):
+            # Evaluation for SPR (drop "mean" for ease of use).
+            best_val_percent_error = val_perc_e_mean
+            if not training_config.classic_mode:
+                if (target == "spr"):
+                    best_state = copy.deepcopy(model.state_dict())
+                    best_epoch = epoch
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+
+        if (val_rmse < best_val_rmse):
+            # Evaluation for SBD.
+            best_val_rmse = val_rmse
+            if not training_config.classic_mode:
+                if (target == "sbd"):
+                    best_state = copy.deepcopy(model.state_dict())
+                    best_epoch = epoch
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+
+        if (val_acc > best_val_acc):
+            # Evaluation for classic mode.
+            best_val_acc = val_acc
+            if training_config.classic_mode:
+                best_state = copy.deepcopy(model.state_dict())
+                best_epoch = epoch
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+        """
+        if (val_acc > best_val_acc):
             best_val_acc = val_acc
             best_state = copy.deepcopy(model.state_dict())
             best_epoch = epoch
             epochs_no_improve = 0
         else:
             epochs_no_improve += 1
+        """
 
         history.epoch_indices.append(epoch)
         history.train_epoch_loss.append(train_loss)
@@ -226,9 +462,21 @@ def train_and_evaluate(
         history.val_epoch_acc.append(val_acc)
         history.learning_rates.append(optimizer.param_groups[0]["lr"])
 
-        print(
-            f"Epoch {epoch:02d} | train_loss={train_loss:.4f} train_acc={train_acc:.3f} "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.3f} best_val_acc={best_val_acc:.3f}"
+        logger.info(
+            f"Epoch {epoch:02d} (Train)\t"
+            f"| train_loss={train_loss:.4f} "
+            f"train_acc={train_acc:.3f} "
+            f"train_rmse={train_rmse:.4f} "
+            f"train_perc_e_mean={train_perc_e_mean:.3f} "
+            f"train_perc_e_std={train_perc_e_std:.3f}\n"
+            f"Epoch {epoch:02d} (Val)\t\t"
+            f"| val_loss={val_loss:.4f} "
+            f"val_acc={val_acc:.3f} "
+            f"val_rmse={val_rmse:.4f} "
+            f"val_perc_e_mean={val_perc_e_mean:.3f} "
+            f"val_perc_e_std={val_perc_e_std:.3f} "
+            f"best_val_rmse={best_val_rmse:.3f} "
+            f"best_val_percent_error={best_val_percent_error:.3f}"
         )
 
         if wandb_run is not None:
@@ -244,21 +492,33 @@ def train_and_evaluate(
                 step=epoch,
             )
 
-        if epochs_no_improve >= config.patience:
-            print("Early stopping triggered.")
+        if epochs_no_improve >= training_config.patience:
+            logger.info("Early stopping triggered.")
             break
 
     model.load_state_dict(best_state)
     history.best_epoch = best_epoch
 
-    test_loss, test_acc, _ = run_epoch(
-        model,
-        test_loader,
-        criterion,
-        device,
-        train=False,
-        split="test",
-    )
+    test_stats, _ = run_epoch(
+            model,
+            test_loader,
+            criterion,
+            device,
+            target=target,
+            train_mean=training_config.train_mean,
+            train_std=training_config.train_std,
+            train=False,
+            split="test",
+        )
+    # Unzip test statistics.
+    test_loss, test_acc, test_rmse, test_perc_e_mean, test_perc_e_std = (
+            test_stats.loss_mean,
+            test_stats.accuracy_mean,
+            test_stats.rmse,
+            test_stats.percent_e_mean,
+            test_stats.percent_e_std
+        )
+    # TODO(nubby):  Expand history tracking of other metrics.
     history.test_loss = test_loss
     history.test_acc = test_acc
 
@@ -268,6 +528,9 @@ def train_and_evaluate(
                 f"{model_name}/best_val_acc": best_val_acc,
                 f"{model_name}/test_acc": test_acc,
                 f"{model_name}/test_loss": test_loss,
+                f"{model_name}/test_rmse": test_rmse,
+                f"{model_name}/test_perc_e_mean": test_perc_e_mean,
+                f"{model_name}/test_perc_e_std": test_perc_e_std,
                 f"{model_name}/best_epoch": best_epoch,
             },
             step=max(history.epoch_indices, default=0),
@@ -279,13 +542,24 @@ def train_and_evaluate(
             "test_acc": test_acc,
             "test_loss": test_loss,
             "best_epoch": best_epoch,
+            "test_rmse": test_rmse,
+            "test_perc_e_mean": test_perc_e_mean,
+            "test_perc_e_std": test_perc_e_std
         },
         history,
     )
 
 
-def save_history(history: TrainingHistory, output_dir: Path, model_name: str) -> Path:
-    """Serialises training history to JSON for downstream analysis."""
+def save_history(
+        history: TrainingHistory,
+        output_dir: Path,
+        model_name: str
+    ) -> Path:
+    """
+    save_history(history, output_dir, model_name) -> history_path
+
+    Serialises training history to JSON for downstream analysis.
+    """
     model_dir = output_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
     history_path = model_dir / "history.json"
@@ -307,8 +581,12 @@ def save_history(history: TrainingHistory, output_dir: Path, model_name: str) ->
     return history_path
 
 
-def save_plots(history: TrainingHistory, output_dir: Path, model_name: str) -> None:
-    """Generates publication-ready loss/accuracy plots."""
+def save_plots(history: TrainingHistory, output_dir: Path, model_name: str):
+    """
+    save_plots(history, output_dir, model_name)
+
+    Generates publication-ready loss/accuracy plots.
+    """
     model_dir = output_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -349,86 +627,325 @@ def save_plots(history: TrainingHistory, output_dir: Path, model_name: str) -> N
             fig.savefig(model_dir / f"{model_name}_train_batch_loss.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
 
-def set_up(
-        no_cuda: bool,
+def _configure_wandb(
+        dataset_summary: dict,
+        name: str,
+        param_count: int,
+        training_config: TrainingConfig,
+        wandb_config: WandbConfig
+    ):
+    """
+    _configure_wandb(...)
+    """
+    wandb_run = None
+    if wandb_config.use_wandb and wandb_config.wandb_mode != "disabled":
+        if wandb is None:
+            # Check if imported wandb lib is found.
+            raise RuntimeError(
+                "Weights & Biases is not installed. Install it with "
+                "'pip install wandb' to enable logging."
+            )
+        run_name = (f"{wandb_config.wandb_run_prefix}-"
+                    f"{name}-"
+                    f"seed{wandb_config.seed}")
+        run_config = {
+            **dataset_summary,
+            "epochs": training_config.epochs,
+            "batch_size": training_config.batch_size,
+            "lr": training_config.lr,
+            "weight_decay": training_config.weight_decay,
+            "patience": training_config.patience,
+            "model": name,
+            "params": param_count,
+        }
+        wandb_run = wandb.init(  # type: ignore[call-arg]
+            project=wandb_config.wandb_project,
+            entity=wandb_config.wandb_entity,
+            group=wandb_config.wandb_group,
+            name=run_name,
+            config=run_config,
+            mode=wandb_config.wandb_mode,
+            reinit=True,
+        )
+
+    return wandb_run
+
+def _print_model_results(model_results: Dict[str, float], name: str, seed: int):
+    """
+    _print_model_results(model_results)
+    """
+    logger.info(
+            f"{name.upper()}, seed={seed}: \n"
+            f"best_val_acc={model_results['best_val_acc']:.3f} "
+            f"test_acc={model_results['test_acc']:.3f} "
+            f"test_loss={model_results['test_loss']:.4f} "
+            f"test_rmse={model_results['test_rmse']:.3f} "
+            f"test_perc_error_mean={model_results['test_perc_e_mean']:.4f} "
+            f"test_perc_error_std={model_results['test_perc_e_std']:.4f} "
+            f"(best_epoch={model_results['best_epoch']})"
+        )
+
+
+def _save_model_results(
+        model_results: Dict[str, float],
+        name: str,
         output_dir: Path,
         seed: int,
-        ) -> torch.device:
-    # Select device for training.
-    device = torch.device(
-            "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+        training_config: TrainingConfig
+    ):
+    """
+    _save_model_results(model_results, name, output_dir, training_config)
+    """
+    logger.info(
+            f"Saving results for {name} (seed={seed}) to {output_dir}."
         )
-    print(f"Using device: {device}")
+    path = output_dir / "results.csv"
+    now = datetime.now(timezone.utc)
 
-    # Set random seed.
-    set_seed(seed)
+    # If the results file and/or directory do not yet exist, add/create them.
+    if not output_dir.is_dir():
+        os.makedirs(output_dir)
 
-    # Set up output directory.
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        line = ",".join([
+                "Timestamp",
+                "ModelName",
+                "Seed",
+                "BestValidationAccuracy",
+                "TestAccuracy",
+                "TestLoss",
+                "TestRMSE",
+                "TestPercentErrorMean",
+                "TestPercentErrorSTD",
+                "BestEpochNumber",
+                "Target",
+                "BatchSize",
+                "UseClassicMode",
+                "NumEpochs",
+                "GradClip",
+                "LearningRate",
+                "Patience",
+                "TrainingMean",
+                "TrainingSTD",
+                "WeightDecay"
+            ]) + "\n"
+        with open(path, "a+") as rp:
+            rp.write(line)
 
-    return device
+    line = ",".join([
+            now.strftime("%Y%m%d_%H%M%S"),
+            name,
+            str(seed),
+            str(model_results["best_val_acc"]),
+            str(model_results["test_acc"]),
+            str(model_results["test_loss"]),
+            str(model_results["test_rmse"]),
+            str(model_results["test_perc_e_mean"]),
+            str(model_results["test_perc_e_std"]),
+            str(model_results["best_epoch"]),
+            training_config.target,
+            str(training_config.batch_size),
+            str(training_config.classic_mode),
+            str(training_config.epochs),
+            str(training_config.grad_clip),
+            str(training_config.lr),
+            str(training_config.patience),
+            str(training_config.train_mean),
+            str(training_config.train_std),
+            str(training_config.weight_decay)
+        ]) + "\n"
+    with open(path, "a+") as rp:
+        rp.write(line)
 
-def benchmark(
-        batch_size: int,
-        data_dir: Path,
-        epochs: int,
-        lr: float,
-        models: list[str],
-        no_cuda: bool,
+
+def _report_model_results(
+        debug_mode: bool,
+        model_history: TrainingHistory,
+        model_results: Dict[str, float],
+        name: str,
         output_dir: Path,
-        patience: float,
+        seed: int,
+        training_config: TrainingConfig
+    ):
+    """
+    _report_model_results(results)
+
+    Print and save model outputs.
+    """
+    _print_model_results(model_results=model_results, name=name, seed=seed)
+    if not debug_mode:
+        _save_model_results(
+                model_results=model_results,
+                output_dir=output_dir,
+                name=name,
+                seed=seed,
+                training_config=training_config
+            )
+        # TODO:
+        save_history(
+                history=model_history,
+                output_dir=output_dir,
+                model_name=name
+            )
+        save_plots(
+                history=model_history,
+                output_dir=output_dir,
+                model_name=name
+            )
+
+def run_benchmark_model(
+        data_bundle: FullDataBundle,
+        dataset_summary: dict,
+        debug_mode: bool,
+        device: torch.device,
+        histories: Dict[str, TrainingHistory],
+        model: nn.Module,
+        name: str,
+        output_dir: Path,
+        results: Dict[str, Dict[str, float]],
+        seed: int,
+        training_config: TrainingConfig,
+        wandb_config: WandbConfig
+    ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, TrainingHistory]]:
+    """
+    run_benchmark_model()
+
+    Begin benchmark evaluations for a given model.
+    """
+    # Gather model parameters.
+    param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    layers = list(model.modules())
+    num_layers = len(layers)
+
+    logger.info(f"\n=== Training {name.upper()} "
+                f"({param_count} params, "
+                f"{num_layers} layers) ===")
+
+    # Move model to device buffer.
+    model.to(device)
+
+    # Configure weights and biases.
+    wandb_run = _configure_wandb(
+            dataset_summary=dataset_summary,
+            name=name,
+            param_count=param_count,
+            training_config=training_config,
+            wandb_config=wandb_config
+        )
+
+    # Run the prepped model through the pipeline.
+    outcomes, history = train_and_evaluate(
+            model=model,
+            data_bundle=data_bundle,
+            device=device,
+            model_name=name,
+            training_config=training_config,
+            target=training_config.target,
+            wandb_run=wandb_run,
+        )
+
+    # Save and report results.
+    results[name] = outcomes
+    histories[name] = history
+    _report_model_results(
+            debug_mode=debug_mode,
+            model_history=history,
+            model_results=outcomes,
+            name=name,
+            output_dir=output_dir,
+            seed=seed,
+            training_config=training_config
+        )
+
+    if wandb_run is not None:
+        wandb_run.finish()
+    
+    return results, histories
+
+def _print_benchmark_results(
+        results: Dict[str, Dict[str, float]],
+        seed: int
+    ):
+    """
+    _print_benchmark_results(results, seed)
+    """
+    logger.info(f"\n=== Summary (seed: {seed}) ===")
+    for name, metrics in results.items():
+        logger.info(
+            f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
+            f"| test_acc={metrics['test_acc']:.3f} "
+            f"| best_epoch={metrics['best_epoch']} "
+            f"| test_rmse={metrics['test_rmse']:.3f} "
+            f"| test_perc_e_mean={metrics['test_perc_e_mean']:.3f} "
+            f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
+        )
+
+def run_benchmark(
+        data_dir: str,
+        debug_mode: bool,
+        models: list[str],
+        output_dir: Path,
         seed: int,
         stride: int,
-        use_wandb: bool,
-        wandb_entity: str,
-        wandb_group: str,
-        wandb_mode: str,
-        wandb_project: str,
-        wandb_run_prefix: str,
-        weight_decay: float,
+        target: str,
+        training_config: TrainingConfig,
+        wandb_config: WandbConfig,
         window_size: int,
     ):
     """
-    benchmark(...)
+    run_benchmark(...)
 
-    Main training pipeline entry point.
+    Perform a single benchmark evaluation.
     """
+    # Set up device for training with a different seed for each eval.
     device = set_up(
-            no_cuda=no_cuda,
+            no_cuda=training_config.no_cuda,
             output_dir=output_dir,
             seed=seed,
         )
 
-    # Create data bundle for training/evals.
+    # Create data bundle for train/val/test splits for each trial (with
+    # different random seed for thoroughness).
+    # TODO(nubby):  Further divide individual trials, either by a fixed size or
+    #               by steps.
     data_bundle = build_data_bundle(
-        data_dir,
-        seed=seed,
-        window_size=window_size,
-        stride=stride,
-        mode="b1"   # NOTE: b1,qcat
-    )
+            data_dir=data_dir,
+            seed=seed,
+            stride=stride,
+            target=target,
+            window_size=window_size
+        )
+    # Extract mean/STD from training set for later use.
+    training_config.train_mean = data_bundle.train_mean
+    training_config.train_std = data_bundle.train_std
+
     input_dim = len(data_bundle.feature_names)
-    num_classes = 3
+    # Number of soil layers to predict (from the top layer down).
+    soil_layers = 1
 
-    config = TrainingConfig(
-        epochs=epochs,
-        batch_size=batch_size,
-        lr=lr,
-        weight_decay=weight_decay,
-        patience=patience,
-    )
-
+    # Set up models.
     available_models = {
-        "lstm": LSTMClassifier(input_dim=input_dim, num_classes=num_classes),
-        "tcn": TemporalConvNetClassifier(input_dim=input_dim, num_classes=num_classes),
-        "transformer": TransformerClassifier(input_dim=input_dim, num_classes=num_classes),
+        "lstm": LSTMEstimator(input_dim=input_dim, num_classes=soil_layers),
+        "tcn": TemporalConvNetEstimator(
+            input_dim=input_dim,
+            num_classes=soil_layers
+        ),
+        "transformer": TransformerEstimator(
+            input_dim=input_dim,
+            num_classes=soil_layers,
+            max_chunk_len=window_size
+        )
     }
 
+    # Verify model selection is valid, then load them.
     unknown = set(models) - set(available_models.keys())
     if unknown:
-        raise ValueError(f"Unknown model names requested: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown model names requested: {', '.join(sorted(unknown))}"
+        )
     models = {name: available_models[name] for name in models}
 
+    # Summarize dataset.
     dataset_summary = {
         "train_samples": len(data_bundle.train),
         "val_samples": len(data_bundle.val),
@@ -438,7 +955,7 @@ def benchmark(
         "stride": stride,
     }
 
-    print(
+    logger.info(
         "Dataset sequences -> "
         f"train: {dataset_summary['train_samples']}, "
         f"val: {dataset_summary['val_samples']}, "
@@ -448,83 +965,130 @@ def benchmark(
         f"stride: {dataset_summary['stride']}"
     )
 
+    # Initialize bulk results/histories here, then pass with evals.
     results: Dict[str, Dict[str, float]] = {}
     histories: Dict[str, TrainingHistory] = {}
 
+    # Run each model through a round of the benchmark.
     for name, model in models.items():
-        param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        layers = list(model.modules())
-        num_layers = len(layers)
-        print(f"\n=== Training {name.upper()} ({param_count} params, {num_layers} layers) ===")
-        model.to(device)
-
-        wandb_run = None
-        if use_wandb and wandb_mode != "disabled":
-            if wandb is None:
-                raise RuntimeError(
-                    "Weights & Biases is not installed. Install it with 'pip install wandb' to enable logging."
-                )
-            run_name = f"{wandb_run_prefix}-{name}-seed{seed}"
-            run_config = {
-                **dataset_summary,
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "lr": lr,
-                "weight_decay": weight_decay,
-                "patience": patience,
-                "model": name,
-                "params": param_count,
-            }
-            wandb_run = wandb.init(  # type: ignore[call-arg]
-                project=wandb_project,
-                entity=wandb_entity,
-                group=wandb_group,
-                name=run_name,
-                config=run_config,
-                mode=wandb_mode,
-                reinit=True,
+        #try:
+        results, histories = run_benchmark_model(
+                data_bundle=data_bundle,
+                dataset_summary=dataset_summary,
+                debug_mode=debug_mode,
+                device=device,
+                histories=histories,
+                model=model,
+                name=name,
+                output_dir=output_dir,
+                results=results,
+                seed=seed,
+                training_config=training_config,
+                wandb_config=wandb_config
             )
+        #finally:
 
-        outcomes, history = train_and_evaluate(
-            model,
-            data_bundle,
-            device,
-            config,
-            model_name=name,
-            wandb_run=wandb_run,
-        )
-        results[name] = outcomes
-        histories[name] = history
-        save_history(history, output_dir, name)
-        save_plots(history, output_dir, name)
-
-        print(
-            f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
-            f"test_acc={outcomes['test_acc']:.3f} test_loss={outcomes['test_loss']:.4f} "
-            f"(best_epoch={outcomes['best_epoch']})"
+    # Report benchmark results for each seed.
+    _print_benchmark_results(
+            results=results,
+            seed=seed
         )
 
-        if wandb_run is not None:
-            wandb_run.finish()
+def _report_results_summary(
+        output_dir: Path
+    ):
+    """
+    _report_results_summary(output_dir)
 
-    print("\n=== Summary ===")
-    for name, metrics in results.items():
-        print(
-            f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
-            f"| test_acc={metrics['test_acc']:.3f} | best_epoch={metrics['best_epoch']}"
+    Summarize and print results/stats for each model's performance (as
+    specified by user).
+    """
+    pass
+
+def benchmark(
+        batch_size: int,
+        classic_mode: bool,
+        data_dir: str,
+        debug_mode: bool,
+        epochs: int,
+        lr: float,
+        models: list[str],
+        n_evals: int,
+        no_cuda: bool,
+        output_dir: Path,
+        patience: float,
+        seed: int,
+        stride: int,
+        target: str,
+        use_wandb: bool,
+        wandb_entity: str,
+        wandb_group: str,
+        wandb_mode: str,
+        wandb_project: str,
+        wandb_run_prefix: str,
+        weight_decay: float,
+        window_size: int,
+        verbose: bool = False
+    ):
+    """
+    benchmark(...)
+
+    Main training pipeline entry point. Perform benchmark evaluations with
+    different seeds to generate useful run statistics.
+    """
+    # Create configs that do not change between runs.
+    wandb_config = WandbConfig(
+            use_wandb=use_wandb,
+            wandb_entity=wandb_entity,
+            wandb_group=wandb_group,
+            wandb_mode=wandb_mode,
+            wandb_project=wandb_project,
+            wandb_run_prefix=wandb_run_prefix
         )
-        print(f"Artifacts saved to {output_dir / name}")
+    training_config = TrainingConfig(
+            batch_size=batch_size,
+            classic_mode=classic_mode,
+            epochs=epochs,
+            lr=lr,
+            no_cuda=no_cuda,
+            patience=patience,
+            target=target,
+            weight_decay=weight_decay
+        )
+
+    for i in range(n_evals):
+        # Each benchmark iteration, only change the seed programmatically.
+        run_benchmark(
+            data_dir=data_dir,
+            debug_mode=debug_mode,
+            models=models,
+            output_dir=output_dir,
+            seed=seed+i,
+            stride=stride,
+            target=target,
+            training_config=training_config,
+            wandb_config=wandb_config,
+            window_size=window_size,
+        )
+
+    logger.info(
+            (f"Completed {n_evals} tests. Goodbye.") if not verbose else 
+            (f"Bye nub.")
+        )
 
 
 if __name__ == "__main__":
+    # Logger setup.
+    logging.basicConfig(level=logging.INFO)
+
     # Arg parsing.
     parser = argparse.ArgumentParser(
             description="Benchmark sequence models on DyRET terrain dataset."
         )
     parser.add_argument(
             "--data-dir",
-            type=Path,
-            default=Path("data"),
+            type=str,
+            default="processed",
             help="Path to the data directory."
         )
     parser.add_argument(
@@ -578,14 +1142,16 @@ if __name__ == "__main__":
     parser.add_argument(
             "--window-size",
             type=int,
-            default=None,
-            help="Optional sliding window size (timesteps) applied within each gait step.",
+            default=2000,
+            help=("Optional sliding window size (timesteps) applied within each"
+                  " sequence/chunk/step used.")
         )
     parser.add_argument(
             "--stride",
             type=int,
             default=None,
-            help="Stride (timesteps) between sliding windows; defaults to window size for non-overlapping segments.",
+            help=("Stride (timesteps) between sliding windows; defaults to "
+                  "window size for non-overlapping segments.")
         )
     parser.add_argument(
             "--use-wandb",
@@ -629,6 +1195,31 @@ if __name__ == "__main__":
             action="store_true",
             help="Force CPU execution even if CUDA is available."
         )
+    # TODO(nubby): Allow for dual prediction?
+    parser.add_argument(
+            "--target",
+            type=str,
+            default="spr",
+            help="Target choice for training/evals [spr, sbd].",
+        )
+    parser.add_argument(
+            "--classic-mode",
+            action="store_true",
+            help=("Evaluate model performance based on number of correct "
+                  "predictions made, versus RMSE (for SBD) and percent error "
+                  "mean (for SPR) in standard mode.")
+        )
+    parser.add_argument(
+            "-n",
+            type=int,
+            default=1,
+            help=("Number of benchmark iterations to run.")
+        )
+    parser.add_argument(
+            "--debug",
+            action="store_true",
+            help=("Enable debug mode.")
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -640,18 +1231,24 @@ if __name__ == "__main__":
     if args.use_wandb and args.wandb_mode == "disabled":
         parser.error("--use-wandb cannot be combined with --wandb-mode "
                      "disabled.")
+    if args.target not in ["spr", "sbd"]:
+        parser.error("--target must be a either spr or sbd.")
 
     benchmark(
             batch_size=args.batch_size,
+            classic_mode=args.classic_mode,
             data_dir=args.data_dir,
+            debug_mode=args.debug,
             epochs=args.epochs,
             lr=args.lr,
             models=args.models,
-            no_cuda=args.no_cuda
+            n_evals=args.n,
+            no_cuda=args.no_cuda,
             output_dir=args.output_dir,
             patience=args.patience,
             seed=args.seed,
             stride=args.stride,
+            target=args.target,
             use_wandb=args.use_wandb,
             wandb_entity=args.wandb_entity,
             wandb_group=args.wandb_group,
