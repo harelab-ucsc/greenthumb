@@ -759,6 +759,7 @@ def _save_model_results(
 
 
 def _report_model_results(
+        debug_mode: bool,
         model_history: TrainingHistory,
         model_results: Dict[str, float],
         name: str,
@@ -772,21 +773,30 @@ def _report_model_results(
     Print and save model outputs.
     """
     _print_model_results(model_results=model_results, name=name, seed=seed)
-    _save_model_results(
-            model_results=model_results,
-            output_dir=output_dir,
-            name=name,
-            seed=seed,
-            training_config=training_config
-        )
-
-    # TODO:
-    save_history(history=model_history, output_dir=output_dir, model_name=name)
-    save_plots(history=model_history, output_dir=output_dir, model_name=name)
+    if not debug_mode:
+        _save_model_results(
+                model_results=model_results,
+                output_dir=output_dir,
+                name=name,
+                seed=seed,
+                training_config=training_config
+            )
+        # TODO:
+        save_history(
+                history=model_history,
+                output_dir=output_dir,
+                model_name=name
+            )
+        save_plots(
+                history=model_history,
+                output_dir=output_dir,
+                model_name=name
+            )
 
 def run_benchmark_model(
         data_bundle: FullDataBundle,
         dataset_summary: dict,
+        debug_mode: bool,
         device: torch.device,
         histories: Dict[str, TrainingHistory],
         model: nn.Module,
@@ -838,6 +848,7 @@ def run_benchmark_model(
     results[name] = outcomes
     histories[name] = history
     _report_model_results(
+            debug_mode=debug_mode,
             model_history=history,
             model_results=outcomes,
             name=name,
@@ -871,6 +882,7 @@ def _print_benchmark_results(
 
 def run_benchmark(
         data_dir: str,
+        debug_mode: bool,
         models: list[str],
         output_dir: Path,
         seed: int,
@@ -963,6 +975,7 @@ def run_benchmark(
         results, histories = run_benchmark_model(
                 data_bundle=data_bundle,
                 dataset_summary=dataset_summary,
+                debug_mode=debug_mode,
                 device=device,
                 histories=histories,
                 model=model,
@@ -996,6 +1009,7 @@ def benchmark(
         batch_size: int,
         classic_mode: bool,
         data_dir: str,
+        debug_mode: bool,
         epochs: int,
         lr: float,
         models: list[str],
@@ -1046,6 +1060,7 @@ def benchmark(
         # Each benchmark iteration, only change the seed programmatically.
         run_benchmark(
             data_dir=data_dir,
+            debug_mode=debug_mode,
             models=models,
             output_dir=output_dir,
             seed=seed+i,
@@ -1193,13 +1208,17 @@ if __name__ == "__main__":
             help=("Evaluate model performance based on number of correct "
                   "predictions made, versus RMSE (for SBD) and percent error "
                   "mean (for SPR) in standard mode.")
-
         )
     parser.add_argument(
             "-n",
             type=int,
             default=1,
             help=("Number of benchmark iterations to run.")
+        )
+    parser.add_argument(
+            "--debug",
+            action="store_true",
+            help=("Enable debug mode.")
         )
     args = parser.parse_args()
 
@@ -1219,6 +1238,7 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             classic_mode=args.classic_mode,
             data_dir=args.data_dir,
+            debug_mode=args.debug,
             epochs=args.epochs,
             lr=args.lr,
             models=args.models,
