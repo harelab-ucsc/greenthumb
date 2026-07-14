@@ -548,8 +548,16 @@ def train_and_evaluate(
     )
 
 
-def save_history(history: TrainingHistory, output_dir: Path, model_name: str) -> Path:
-    """Serialises training history to JSON for downstream analysis."""
+def save_history(
+        history: TrainingHistory,
+        output_dir: Path,
+        model_name: str
+    ) -> Path:
+    """
+    save_history(history, output_dir, model_name) -> history_path
+
+    Serialises training history to JSON for downstream analysis.
+    """
     model_dir = output_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
     history_path = model_dir / "history.json"
@@ -571,8 +579,12 @@ def save_history(history: TrainingHistory, output_dir: Path, model_name: str) ->
     return history_path
 
 
-def save_plots(history: TrainingHistory, output_dir: Path, model_name: str) -> None:
-    """Generates publication-ready loss/accuracy plots."""
+def save_plots(history: TrainingHistory, output_dir: Path, model_name: str):
+    """
+    save_plots(history, output_dir, model_name)
+
+    Generates publication-ready loss/accuracy plots.
+    """
     model_dir = output_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -656,6 +668,57 @@ def _configure_wandb(
 
     return wandb_run
 
+def _print_model_results(model_results: Dict[str, float], name: str, seed: int):
+    """
+    _print_model_results(model_results)
+    """
+    logger.info(
+            f"{name.upper()}, seed={seed}: \n"
+            f"best_val_acc={model_results['best_val_acc']:.3f} "
+            f"test_acc={model_results['test_acc']:.3f} "
+            f"test_loss={model_results['test_loss']:.4f} "
+            f"test_rmse={model_results['test_rmse']:.3f} "
+            f"test_perc_error_mean={model_results['test_perc_e_mean']:.4f} "
+            f"test_perc_error_std={model_results['test_perc_e_std']:.4f} "
+            f"(best_epoch={model_results['best_epoch']})"
+        )
+
+
+def _save_model_results(
+        model_results: Dict[str, float],
+        output_dir: Path,
+        name: str,
+        seed: int
+    ):
+    """
+    _save_model_results(model_results, output_path)
+    """
+    pass
+
+def _report_model_results(
+        model_history: TrainingHistory,
+        model_results: Dict[str, float],
+        name: str,
+        output_dir: Path,
+        seed: int
+    ):
+    """
+    _report_model_results(results)
+
+    Print and save model outputs.
+    """
+    _print_model_results(model_results=model_results, name=name, seed=seed)
+    _save_model_results(
+            model_results=model_results,
+            output_dir=output_dir,
+            name=name,
+            seed=seed
+        )
+
+    # TODO:
+    save_history(history=model_history, output_dir=output_dir, model_name=name)
+    save_plots(history=model_history, output_dir=output_dir, model_name=name)
+
 def run_benchmark_model(
         data_bundle: FullDataBundle,
         dataset_summary: dict,
@@ -663,11 +726,12 @@ def run_benchmark_model(
         histories: Dict[str, TrainingHistory],
         model: nn.Module,
         name: str,
+        output_dir: Path,
         results: Dict[str, Dict[str, float]],
         seed: int,
         training_config: TrainingConfig,
         wandb_config: WandbConfig
-    ):
+    ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, TrainingHistory]]:
     """
     run_benchmark_model()
 
@@ -705,33 +769,33 @@ def run_benchmark_model(
             wandb_run=wandb_run,
         )
 
-    # Save results.
+    # Save and report results.
     results[name] = outcomes
     histories[name] = history
-    save_history(history, output_dir, name)
-    save_plots(history, output_dir, name)
-
-    logger.info(
-        f"{name.upper()} best_val_acc={outcomes['best_val_acc']:.3f} "
-        f"test_acc={outcomes['test_acc']:.3f} "
-        f"test_loss={outcomes['test_loss']:.4f} "
-        f"test_rmse={outcomes['test_rmse']:.3f} "
-        f"test_perc_error_mean={outcomes['test_perc_e_mean']:.4f} "
-        f"test_perc_error_std={outcomes['test_perc_e_std']:.4f} "
-        f"(best_epoch={outcomes['best_epoch']})"
-    )
+    _report_model_results(
+            model_history=history,
+            model_results=outcomes,
+            name=name,
+            output_dir=output_dir,
+            seed=seed
+        )
 
     if wandb_run is not None:
         wandb_run.finish()
     
-    return outcomes, history
+    return results, histories
 
-def _print_results(results: dict):
+def _print_benchmark_results(
+        results: Dict[str, Dict[str, float]],
+        seed: int
+    ):
     """
-    _print_results(results)
+    _print_benchmark_results(results, seed)
     """
-    logger.info("\n=== Summary ===")
+    logger.info(f"\n=== Summary (seed: {seed}) ===")
+    print(results)
     for name, metrics in results.items():
+        print(metrics)
         logger.info(
             f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
             f"| test_acc={metrics['test_acc']:.3f} "
@@ -741,22 +805,6 @@ def _print_results(results: dict):
             f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
         )
         logger.info(f"Artifacts saved to {output_dir / name}")
-
-def _save_results(results: dict, output_dir: str):
-    """
-    _save_results(results, output_path)
-    """
-    print(results)
-    exit()
-
-def _report_model_results(results: dict, output_dir: str):
-    """
-    _report_model_results(results)
-
-    Print and save model outputs.
-    """
-    _print_results(results=results)
-    _save_results(results=results, output_dir=output_dir)
 
 def run_benchmark(
         data_dir: str,
@@ -856,14 +904,30 @@ def run_benchmark(
                 histories=histories,
                 model=model,
                 name=name,
+                output_dir=output_dir,
                 results=results,
                 seed=seed,
                 training_config=training_config,
                 wandb_config=wandb_config
             )
         #finally:
-        # Always print and save results per evaluation.
-        _report_model_results(results=results, output_dir=output_dir)
+
+    # Report benchmark results for each seed.
+    _print_benchmark_results(
+            results=results,
+            seed=seed
+        )
+
+def _report_results_summary(
+        output_dir: Path
+    ):
+    """
+    _report_results_summary(output_dir)
+
+    Summarize and print results/stats for each model's performance (as
+    specified by user).
+    """
+    pass
 
 def benchmark(
         batch_size: int,
