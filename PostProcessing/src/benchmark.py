@@ -693,6 +693,9 @@ def _save_model_results(
     """
     _save_model_results(model_results, output_path)
     """
+    logger.info(
+            f"Saving results for {name} (seed={seed}) to {output_dir}."
+        )
     pass
 
 def _report_model_results(
@@ -793,9 +796,7 @@ def _print_benchmark_results(
     _print_benchmark_results(results, seed)
     """
     logger.info(f"\n=== Summary (seed: {seed}) ===")
-    print(results)
     for name, metrics in results.items():
-        print(metrics)
         logger.info(
             f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
             f"| test_acc={metrics['test_acc']:.3f} "
@@ -804,7 +805,6 @@ def _print_benchmark_results(
             f"| test_perc_e_mean={metrics['test_perc_e_mean']:.3f} "
             f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
         )
-        logger.info(f"Artifacts saved to {output_dir / name}")
 
 def run_benchmark(
         data_dir: str,
