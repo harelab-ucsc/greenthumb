@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    9 Jul 2026
+    14 Jul 2026
 
 Version:
-    1.1.1
+    1.2.0
 """
 from __future__ import annotations
 
