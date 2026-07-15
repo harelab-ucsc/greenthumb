@@ -1,20 +1,25 @@
 """
 preprocess_dataset.py
 
+Prepare raw datasets for ingestion into DL models through chunking. This file
+can be thought of as the first (supervised) layer in the GreenThumb eval
+pipeline.
+
 Author:
     HARE Lab
     jLab
     nubby
 
 Date:
-    30 Jun 2026
+    14 Jul 2026
 
 Version:
-    1.1.0
+    1.2.0
 """
 import argparse
 import copy as cp
 import csv
+import logging
 import matplotlib
 import numpy as np
 import os
@@ -23,6 +28,10 @@ import re
 
 from datetime import datetime, timedelta
 from io import StringIO
+
+from step_detector import B1Step, get_steps_from_b1_df
+
+logger = logging.getLogger("greenthumb")
 
 
 # Useful macros.
@@ -1383,12 +1392,15 @@ def _write_labeled_df(df: pd.DataFrame, path_base: str):
 def preprocess_dataset(
         path_input_dir: str,
         path_output_dir: str,
-        force: bool = False
+        do_force: bool = False,
+        do_steps: bool = False
     ):
     """
     preprocess_dataset(
             path_input_dir,
-            path_output_dir
+            path_output_dir,
+            do_force,
+            do_steps
         )
 
     Description:
@@ -1415,7 +1427,7 @@ def preprocess_dataset(
 
     # Check which datasets have already been formatted to skip.
     to_skip = []
-    if not force:
+    if not do_force:
         to_skip += check_previously_run_datasets(path_output_dir)
 
     # Process all desired datasets as follows:
@@ -1440,10 +1452,15 @@ def preprocess_dataset(
         df_pen=df_pen,
         df_teros12=df_teros12)
 
-    # Write fully-processed, labeled datasets to files for further processing/
-    # learning/training.
     for df in dfs_b1_out:
-        _write_labeled_df(df, path_base=path_output_dir)
+        if do_steps:
+            # Split into individual steps if specified.
+            steps = get_steps_from_b1_df(df=df)
+            [step.write(output_dir=path_output_dir) for step in steps]
+        else:
+            # Write fully-processed, labeled datasets to files for further
+            # processing/learning/training.
+            _write_labeled_df(df, path_base=path_output_dir)
 
 
 if __name__ == "__main__":
@@ -1454,13 +1471,18 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="processed")
     parser.add_argument(
         "--force",
-        type=bool,
-        default=False,
+        action="store_true",
         help="Force script to reprocess data?"
+    )
+    parser.add_argument(
+        "--steps",
+        action="store_true",
+        help="Break each walk DataFrame into individual steps?"
     )
     args = parser.parse_args()
     preprocess_dataset(
+        do_force=args.force,
+        do_steps=args.steps,
         path_input_dir=args.input_dir,
-        path_output_dir=args.output_dir,
-        force=args.force
+        path_output_dir=args.output_dir
     )
