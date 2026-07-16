@@ -3,10 +3,10 @@
 step_detector.py
 
 Date:
-    14 Jul 2026
+    15 Jul 2026
 
 Version:
-    0.1.0
+    0.1.1
 """
 import csv
 import logging
@@ -49,10 +49,40 @@ class B1Step(object):
             ts_start    (datetime)      First timestamp of step.
         """
         self.df = df
-        self.leg = leg
-        self.end_effector = end_effector
+        self.leg = leg.lower()
+        self.idx_step = idx_step
+        self.trial_label = trial_label
         self.ts_end = ts_end
         self.ts_start = ts_start
+
+    def plot(self):
+        """
+        plot()
+
+        Plot joint angle, torque, and angular velocity of the stepping leg with
+        respect to time.
+        """
+        # Define columns per leg.
+        lut_leg = {
+                "fr": ["FRKneeQ (rad)", "FRKneedQ (rps)"],
+                "fl": ["FLKneeQ (rad)", "FLKneedQ (rps)"],
+                "rr": ["RRKneeQ (rad)", "RRKneedQ (rps)"],
+                "rl": ["RLKneeQ (rad)", "RLKneedQ (rps)"]
+            }
+        idx_col = ["Timestamp (Epoch-UTC-ms)"]
+        leg_cols = lut_leg[self.leg]
+        cols = idx_col + leg_cols 
+
+        # Filter.
+        df = self.df[cols]
+
+        # Plot with timestamps on the x-axis.
+        df.set_index(idx_col)[leg_cols].plot(
+                subplots=True,
+                sharex=True,
+                figsize=(10, 6)
+            )
+        plt.show()
 
     def write(self, output_dir: str):
         """
@@ -71,7 +101,7 @@ class B1Step(object):
 
 # Module-level variables.
 _EPSILON = 0.0001
-_THRESHOLD_TS_MS_STEP = 50
+_THRESHOLD_TS_MS_STEP = 400
 
 
 # Meat.
@@ -98,6 +128,7 @@ def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
     leg_angles = ts_filtered[lut_leg[leg][0]].values
 
     # Find the time between each step max.
+    # TODO: Confirm that this is indeed capturing the moment of pad contact.
     idx = 0
     delta = 0
     step_ts = []
@@ -155,12 +186,50 @@ def find_steps_by_da_dt_max(df: pd.DataFrame) -> tuple[datetime]:
     logging.warning("Finding steps by (da/dt)_max is WIP.")
     return []
 
+def get_steps_from_step_events(
+        df: pd.DataFrame,
+        leg_events: dict,
+        trial_label: str
+    ) -> list[B1Step]:
+    """
+    get_steps_from_step_events(df, events) -> steps
+    """
+    steps = []
+    
+    # Pad around the step event to capture the entire step event.
+    for leg, events in leg_events.items():
+        for idx_step, event in enumerate(events):
+            # Find the start/end timestamps for each event (small overlaps
+            # okay).
+            ts_start = event - (_THRESHOLD_TS_MS_STEP * 2)
+            ts_end = event + (_THRESHOLD_TS_MS_STEP * 2)
+
+            # Filter each event's DF appropriately.
+            event_df = df.loc[(df["Timestamp (Epoch-UTC-ms)"] >= ts_start) &
+                              (df["Timestamp (Epoch-UTC-ms)"] <= ts_end)]
+
+            # Convert into a B1Step object.
+            step = B1Step(
+                df=event_df,
+                leg=leg,
+                idx_step=idx_step,
+                trial_label=trial_label,
+                ts_end=ts_end,
+                ts_start=ts_start
+            )
+            steps.append(step)
+
+    return steps
+            
+
 def get_steps_from_b1_df(
         df: pd.DataFrame,
+        trial_label: str,
         method: str = "knee_angle"
     ) -> list[B1Step]:
     """
     get_steps_from_b1_df(df) -> steps
+    print(step_events)
 
     Break a provided DataFrame into individual steps based on B1 proprioceptive
     sensor streams.
@@ -182,7 +251,15 @@ def get_steps_from_b1_df(
     step_events = lut_step_isolator[method](df=df)
 
     # Convert step events into steps.
-    # TODO
+    steps = get_steps_from_step_events(
+        df=df,
+        leg_events=step_events,
+        trial_label=trial_label
+    )
+
+    # Plot a sample of steps if desired.
+    logging.info(f"Plotting sample step.")
+    steps[0].plot()
     exit()
 
 
@@ -369,11 +446,12 @@ def step_detector():
 
     # Convert the input CSV file into a Pandas DataFrame.
     csv_path = sys.argv[1]
+    trial_label = csv_path.split("/")[-1].split(".")[0]
     df = _read_csv(csv_path)
 
     #print_df_stats(df)
     #extract_steps_from_df(df)
-    get_steps_from_b1_df(df)
+    get_steps_from_b1_df(df=df, trial_label=trial_label)
 
 if __name__ == "__main__":
     step_detector()
