@@ -6,7 +6,7 @@ Date:
     15 Jul 2026
 
 Version:
-    0.1.1
+    0.1.3
 """
 import csv
 import logging
@@ -84,9 +84,9 @@ class B1Step(object):
             )
         plt.show()
 
-    def write(self, output_dir: str):
+    def save(self, output_dir: str):
         """
-        write(output_dir)
+        save(output_dir)
 
         Write contained DF to file based on its properties.
         """
@@ -189,10 +189,15 @@ def find_steps_by_da_dt_max(df: pd.DataFrame) -> tuple[datetime]:
 def get_steps_from_step_events(
         df: pd.DataFrame,
         leg_events: dict,
-        trial_label: str
+        trial_label: str,
+        plotting: bool = False
     ) -> list[B1Step]:
     """
     get_steps_from_step_events(df, events) -> steps
+
+    Args:
+        ...
+        plotting    (bool)  Plot a handful of steps before writing?
     """
     steps = []
     
@@ -225,7 +230,8 @@ def get_steps_from_step_events(
 def get_steps_from_b1_df(
         df: pd.DataFrame,
         trial_label: str,
-        method: str = "knee_angle"
+        method: str = "knee_angle",
+        plotting: bool = False
     ) -> list[B1Step]:
     """
     get_steps_from_b1_df(df) -> steps
@@ -258,9 +264,18 @@ def get_steps_from_b1_df(
     )
 
     # Plot a sample of steps if desired.
-    logging.info(f"Plotting sample step.")
-    steps[0].plot()
-    exit()
+    if plotting:
+        n_steps = 5
+        for idx in range(n_steps):
+            logging.info(f"Plotting sample step {idx+1}; press CTRL+C to cancel"
+                         f" file saving.")
+            try:
+                steps[idx].plot()
+            except KeyboardInterrupt:
+                logging.info("USER canceled saving operation!")
+                exit()
+
+    return steps
 
 
 def print_df_stats(df: pd.DataFrame):
@@ -451,7 +466,8 @@ def step_detector():
 
     #print_df_stats(df)
     #extract_steps_from_df(df)
-    get_steps_from_b1_df(df=df, trial_label=trial_label)
+    get_steps_from_b1_df(df=df, plotting=True, trial_label=trial_label)
 
 if __name__ == "__main__":
+    # TODO: Add argparser here.
     step_detector()
