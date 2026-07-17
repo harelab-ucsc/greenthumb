@@ -266,16 +266,20 @@ def get_steps_from_b1_df(
     )
 
     # Plot a sample of steps if desired.
+    n_steps = 3
     if plotting:
-        n_steps = 3
         for idx in range(n_steps):
-            logging.info(f"Plotting sample step {idx+1}; press CTRL+C to cancel"
-                         f" file saving.")
-            try:
-                steps[idx].plot()
-            except KeyboardInterrupt:
-                logging.info("USER canceled saving operation!")
-                exit()
+            if idx < len(steps):
+                logging.info(f"Plotting sample step {idx+1} from {trial_label};"
+                              " press CTRL+C to cancel file saving.")
+                try:
+                    steps[idx].plot()
+                except KeyboardInterrupt:
+                    logging.info("USER canceled saving operation!")
+                    exit()
+            else:
+                logging.warning(f"{idx} steps present in {trial_label}.")
+                break
 
     return steps
 
