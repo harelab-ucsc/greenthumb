@@ -1467,8 +1467,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Convert raw sensor data into a form usable by GreenThumb."
     )
-    parser.add_argument("--input_dir", type=str, default="../Data")
-    parser.add_argument("--output_dir", type=str, default="processed")
+    parser.add_argument("--input-dir", type=str, default="../Data")
+    parser.add_argument("--output-dir", type=str, default="processed")
     parser.add_argument(
         "--force",
         action="store_true",

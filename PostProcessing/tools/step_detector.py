@@ -3,16 +3,18 @@
 step_detector.py
 
 Date:
-    15 Jul 2026
+    16 Jul 2026
 
 Version:
-    0.1.3
+    0.1.4
 """
+import argparse
 import csv
 import logging
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
 import sys
 
@@ -265,7 +267,7 @@ def get_steps_from_b1_df(
 
     # Plot a sample of steps if desired.
     if plotting:
-        n_steps = 5
+        n_steps = 3
         for idx in range(n_steps):
             logging.info(f"Plotting sample step {idx+1}; press CTRL+C to cancel"
                          f" file saving.")
@@ -454,20 +456,58 @@ def _read_csv(path: str) -> pd.DataFrame:
 
     return df
 
-def step_detector():
-    if len(sys.argv) < 2:
-        print("Usage: python3 script.py <input.csv>")
-        sys.exit(1)
+def _find_csvs(input_dir: str) -> list[str]:
+    """
+    _find_csvs(input_dir) -> paths
+    """
+    paths = ["/".join([input_dir, path]) for path in os.listdir(input_dir)]
 
-    # Convert the input CSV file into a Pandas DataFrame.
-    csv_path = sys.argv[1]
-    trial_label = csv_path.split("/")[-1].split(".")[0]
-    df = _read_csv(csv_path)
+    return [path for path in paths if (
+        os.path.isfile(path) and path.endswith("csv"))]
 
-    #print_df_stats(df)
-    #extract_steps_from_df(df)
-    get_steps_from_b1_df(df=df, plotting=True, trial_label=trial_label)
+def step_detector(
+        input_path: str,
+        output_dir: str
+    ):
+    """
+    step_detector(input_dir, output_dir)
+    """
+    # Triage input_path to find either directory or file to ingest.
+    if os.path.isdir(input_path):
+        # If path is a directory, import all valid files.
+        input_paths = _find_csvs(input_dir=input_path)
+    else:
+        input_paths = [input_path]
+
+    # Iterate through each preprocessed path to find steps.
+    for path in input_paths:
+        # Convert the input CSV file into a Pandas DataFrame.
+        trial_label = path.split("/")[-1].split(".")[0]
+        df = _read_csv(path)
+
+        #print_df_stats(df)
+        #extract_steps_from_df(df)
+        steps = get_steps_from_b1_df(
+                df=df,
+                plotting=True,
+                trial_label=trial_label
+            )
+
 
 if __name__ == "__main__":
-    # TODO: Add argparser here.
-    step_detector()
+    # Logger setup.
+    logging.basicConfig(level=logging.INFO)
+
+    # Parse args for later triage.
+    parser = argparse.ArgumentParser(
+        description=("Run preprocessing specifically related to finding step"
+                     " events.")
+    )
+    parser.add_argument("--input-path", type=str, default="processed")
+    parser.add_argument("--output-dir", type=str, default="steps")
+    args = parser.parse_args()
+
+    step_detector(
+            input_path=args.input_path,
+            output_dir=args.output_dir,
+        )
