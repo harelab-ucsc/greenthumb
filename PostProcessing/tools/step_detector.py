@@ -35,8 +35,8 @@ class B1Step(object):
     def __init__(
             self,
             df: pd.DataFrame,
-            leg: str,
             idx_step: int,
+            leg: str,
             trial_label: str,
             ts_end: datetime,
             ts_start: datetime,
@@ -44,15 +44,15 @@ class B1Step(object):
         """
         Args:
             df          (pd.DataFrame)  Pandas DF for step data.
-            leg         (str)           [fr,fl,rr,rl].
             idx_step    (int)           Index of step within session/motion.
+            leg         (str)           [fr,fl,rr,rl].
             trial_label (str)           Name of data collection session.
             ts_end      (datetime)      Last timestamp of step.
             ts_start    (datetime)      First timestamp of step.
         """
         self.df = df
-        self.leg = leg.lower()
         self.idx_step = idx_step
+        self.leg = leg.lower()
         self.trial_label = trial_label
         self.ts_end = ts_end
         self.ts_start = ts_start
@@ -92,18 +92,26 @@ class B1Step(object):
 
         Write contained DF to file based on its properties.
         """
+        # Create the output directory if needed.
+        if (not os.path.isdir(output_dir)):
+            os.mkdir(output_dir)
+
+        # Generate path name.
         fname = "-".join([
-            self.trial_label,
-            self.leg,
-            str(self.idx_step)
-        ]) + ".csv"
-        path = os.path.join([output_dir, fname])
+                self.trial_label,
+                self.leg,
+                str(self.idx_step)
+            ]) + ".csv"
+        path = os.path.join(output_dir, fname)
+
+        # Save.
+        logging.debug(f"Saving step {fname} to {path}.")
         self.df.to_csv(path, index=False)
 
 
 # Module-level variables.
 _EPSILON = 0.0001
-_THRESHOLD_TS_MS_STEP = 400
+_THRESHOLD_TS_MS_STEP = 500
 
 
 # Meat.
@@ -211,9 +219,9 @@ def get_steps_from_step_events(
             ts_start = event - (_THRESHOLD_TS_MS_STEP * 2)
             ts_end = event + (_THRESHOLD_TS_MS_STEP * 2)
 
-            # Filter each event's DF appropriately.
+            # Filter each event's DF appropriately (to exactly 1000 values).
             event_df = df.loc[(df["Timestamp (Epoch-UTC-ms)"] >= ts_start) &
-                              (df["Timestamp (Epoch-UTC-ms)"] <= ts_end)]
+                              (df["Timestamp (Epoch-UTC-ms)"] < ts_end)]
 
             # Convert into a B1Step object.
             step = B1Step(
@@ -264,6 +272,7 @@ def get_steps_from_b1_df(
         leg_events=step_events,
         trial_label=trial_label
     )
+    logging.info(f"Detected {len(steps)} steps in {trial_label}.")
 
     # Plot a sample of steps if desired.
     n_steps = 3
@@ -471,10 +480,11 @@ def _find_csvs(input_dir: str) -> list[str]:
 
 def step_detector(
         input_path: str,
-        output_dir: str
+        output_dir: str,
+        plotting: bool
     ):
     """
-    step_detector(input_dir, output_dir)
+    step_detector(input_dir, output_dir, plotting)
     """
     # Triage input_path to find either directory or file to ingest.
     if os.path.isdir(input_path):
@@ -493,9 +503,13 @@ def step_detector(
         #extract_steps_from_df(df)
         steps = get_steps_from_b1_df(
                 df=df,
-                plotting=True,
+                plotting=plotting,
                 trial_label=trial_label
             )
+
+        logging.info(f"Saving {len(steps)} steps.")
+        [step.save(output_dir=output_dir) for step in steps]
+        logging.info("DONE.")
 
 
 if __name__ == "__main__":
@@ -507,11 +521,27 @@ if __name__ == "__main__":
         description=("Run preprocessing specifically related to finding step"
                      " events.")
     )
-    parser.add_argument("--input-path", type=str, default="processed")
-    parser.add_argument("--output-dir", type=str, default="steps")
+    parser.add_argument(
+            "--input-path",
+            type=str,
+            default="processed",
+            help="Path to input file or directory."
+        )
+    parser.add_argument(
+            "--output-dir",
+            type=str,
+            default="steps",
+            help="Path to output directory."
+        )
+    parser.add_argument(
+            "--plotting",
+            action="store_true",
+            help="Enable plotting previews for steps from each digested file?"
+        )
     args = parser.parse_args()
 
     step_detector(
             input_path=args.input_path,
             output_dir=args.output_dir,
+            plotting=args.plotting
         )
