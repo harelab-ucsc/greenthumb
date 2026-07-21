@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    14 Jul 2026
+    21 Jul 2026
 
 Version:
-    1.2.0
+    1.2.1
 """
 from __future__ import annotations
 
@@ -553,7 +553,8 @@ def train_and_evaluate(
 def save_history(
         history: TrainingHistory,
         output_dir: Path,
-        model_name: str
+        model_name: str,
+        label: str
     ) -> Path:
     """
     save_history(history, output_dir, model_name) -> history_path
@@ -562,7 +563,7 @@ def save_history(
     """
     model_dir = output_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
-    history_path = model_dir / "history.json"
+    history_path = model_dir / f"{label}_history.json"
     payload = {
         "epoch_indices": history.epoch_indices,
         "train_epoch_loss": history.train_epoch_loss,
@@ -581,7 +582,12 @@ def save_history(
     return history_path
 
 
-def save_plots(history: TrainingHistory, output_dir: Path, model_name: str):
+def save_plots(
+        history: TrainingHistory,
+        output_dir: Path,
+        model_name: str,
+        label: str
+    ):
     """
     save_plots(history, output_dir, model_name)
 
@@ -612,7 +618,7 @@ def save_plots(history: TrainingHistory, output_dir: Path, model_name: str):
             axes[1].legend()
 
             fig.tight_layout()
-            fig.savefig(model_dir / f"{model_name}_epoch_metrics.png", dpi=300, bbox_inches="tight")
+            fig.savefig(model_dir / f"{label}_{model_name}_epoch_metrics.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
 
     if history.train_batch_step:
@@ -624,7 +630,7 @@ def save_plots(history: TrainingHistory, output_dir: Path, model_name: str):
             ax.set_title(f"{model_name.upper()} Training Batch Loss")
             ax.grid(True, which="both", linestyle="--", linewidth=0.5)
             fig.tight_layout()
-            fig.savefig(model_dir / f"{model_name}_train_batch_loss.png", dpi=300, bbox_inches="tight")
+            fig.savefig(model_dir / f"{label}_{model_name}_train_batch_loss.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
 
 def _configure_wandb(
@@ -692,9 +698,10 @@ def _save_model_results(
         output_dir: Path,
         seed: int,
         training_config: TrainingConfig
-    ):
+    ) -> str:
     """
-    _save_model_results(model_results, name, output_dir, training_config)
+    _save_model_results(
+        model_results, name, output_dir, training_config) -> label
     """
     logger.info(
             f"Saving results for {name} (seed={seed}) to {output_dir}."
@@ -732,8 +739,26 @@ def _save_model_results(
         with open(path, "a+") as rp:
             rp.write(line)
 
+    # Generate the timestamp and label.
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    classic = "classic" if training_config.classic_mode else "alt"
+    label = "-".join([
+        ts,
+        name,
+        str(seed),
+        training_config.target,
+        classic,
+        str(training_config.batch_size),
+        str(training_config.epochs),
+        str(training_config.grad_clip),
+        str(training_config.lr),
+        str(training_config.patience),
+        str(training_config.weight_decay)
+    ])
+
+    # Write a line.
     line = ",".join([
-            now.strftime("%Y%m%d_%H%M%S"),
+            ts,
             name,
             str(seed),
             str(model_results["best_val_acc"]),
@@ -757,6 +782,7 @@ def _save_model_results(
     with open(path, "a+") as rp:
         rp.write(line)
 
+    return label
 
 def _report_model_results(
         debug_mode: bool,
@@ -774,7 +800,7 @@ def _report_model_results(
     """
     _print_model_results(model_results=model_results, name=name, seed=seed)
     if not debug_mode:
-        _save_model_results(
+        label = _save_model_results(
                 model_results=model_results,
                 output_dir=output_dir,
                 name=name,
@@ -785,12 +811,14 @@ def _report_model_results(
         save_history(
                 history=model_history,
                 output_dir=output_dir,
-                model_name=name
+                model_name=name,
+                label=label
             )
         save_plots(
                 history=model_history,
                 output_dir=output_dir,
-                model_name=name
+                model_name=name,
+                label=label
             )
 
 def run_benchmark_model(
