@@ -3,10 +3,10 @@
 step_detector.py
 
 Date:
-    16 Jul 2026
+    21 Jul 2026
 
 Version:
-    0.1.4
+    0.1.5
 """
 import argparse
 import csv
@@ -96,7 +96,7 @@ class B1Step(object):
         if (not os.path.isdir(output_dir)):
             os.mkdir(output_dir)
 
-        # Generate path name.
+        # Generate path name from trial label, leg name, and step number.
         fname = "-".join([
                 self.trial_label,
                 self.leg,
@@ -122,23 +122,26 @@ def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
     Leg options:    [fr, fl, rr, rl]
     """
     lut_leg = {
-            "fr": ["FRKneeQ (rad)", "FRKneedQ (rps)"],
-            "fl": ["FLKneeQ (rad)", "FLKneedQ (rps)"],
-            "rr": ["RRKneeQ (rad)", "RRKneedQ (rps)"],
-            "rl": ["RLKneeQ (rad)", "RLKneedQ (rps)"]
+            "fr": ["FRKneeQ (rad)", "FRKneedQ (rps)", "FRKneed2Q (rps^2)"],
+            "fl": ["FLKneeQ (rad)", "FLKneedQ (rps)", "FLKneed2Q (rps^2)"],
+            "rr": ["RRKneeQ (rad)", "RRKneedQ (rps)", "RRKneed2Q (rps^2)"],
+            "rl": ["RLKneeQ (rad)", "RLKneedQ (rps)", "RLKneed2Q (rps^2)"]
         }
     cols = ["Timestamp (Epoch-UTC-ms)"]
     cols += lut_leg[leg.lower()]
 
+    # Filter by finding the min angle (retracted leg == most negative) with
+    # dQ and d2Q; we are actually capturing the "leg bending" event rather than
+    # "contact" event here.
     df_filtered = df[cols]
     ts_filtered = df_filtered.loc[
-            df_filtered[lut_leg[leg][1]].abs() < _EPSILON
+            (df_filtered[lut_leg[leg][1]].abs() < _EPSILON) &
+            (df_filtered[lut_leg[leg][2]] > 0)
         ]
     leg_ts = ts_filtered["Timestamp (Epoch-UTC-ms)"].astype("int64").values
     leg_angles = ts_filtered[lut_leg[leg][0]].values
 
-    # Find the time between each step max.
-    # TODO: Confirm that this is indeed capturing the moment of pad contact.
+    # Only return timestamps of step events that are sufficiently separated.
     idx = 0
     delta = 0
     step_ts = []
@@ -171,7 +174,11 @@ def find_steps_by_knee_angle(df: pd.DataFrame) -> dict:
             "FRKneedQ (rps)",
             "FLKneedQ (rps)",
             "RRKneedQ (rps)",
-            "RLKneedQ (rps)"
+            "RLKneedQ (rps)",
+            "FRKneed2Q (rps^2)",
+            "FLKneed2Q (rps^2)",
+            "RRKneed2Q (rps^2)",
+            "RLKneed2Q (rps^2)"
         ]
     df_filtered = df[cols]
 
@@ -221,7 +228,14 @@ def get_steps_from_step_events(
 
             # Filter each event's DF appropriately (to exactly 1000 values).
             event_df = df.loc[(df["Timestamp (Epoch-UTC-ms)"] >= ts_start) &
-                              (df["Timestamp (Epoch-UTC-ms)"] < ts_end)]
+                              (df["Timestamp (Epoch-UTC-ms)"] < ts_end)].copy()
+
+            # Update label in step's DF to reflect unique event.
+            event_df["Dataset Label"] = "-".join([
+                trial_label,
+                leg,
+                str(idx_step)
+            ])
 
             # Convert into a B1Step object.
             step = B1Step(
