@@ -9,10 +9,10 @@ Author:
     nubby
 
 Date:
-    20 Jul 2026
+    21 Jul 2026
 
 Version:
-    0.0.2
+    1.0.0
 """
 import argparse
 import csv
@@ -117,6 +117,15 @@ def post_process_results(path_results: str):
             perc_e_alt_trans_min_seed = df_alt_trans.loc[
                     df_alt_trans["TestPercentErrorMean"] == perc_e_alt_trans_min, "Seed"]
             """
+            acc_classic_lstm_max = df_classic_lstm["TestAccuracy"].max()
+            acc_classic_lstm_max_seed = df_classic_lstm.loc[
+                    df_classic_lstm["TestAccuracy"] == acc_classic_lstm_max, "Seed"].iloc[0]
+            acc_classic_tcn_max = df_classic_tcn["TestAccuracy"].max()
+            acc_classic_tcn_max_seed = df_classic_tcn.loc[
+                    df_classic_tcn["TestAccuracy"] == acc_classic_tcn_max, "Seed"].iloc[0]
+            acc_classic_trans_max = df_classic_trans["TestAccuracy"].max()
+            acc_classic_trans_max_seed = df_classic_trans.loc[
+                    df_classic_trans["TestAccuracy"] == acc_classic_trans_max, "Seed"].iloc[0]
 
             # Print it.
             logging.info(
@@ -130,6 +139,7 @@ def post_process_results(path_results: str):
                     f"\tLSTM:\tSTD test RMSE:\t\t{df_classic_lstm['TestRMSE'].std()}\n"
                     f"\tLSTM:\tAvg test % err:\t\t{df_classic_lstm['TestPercentErrorMean'].mean()}\n"
                     f"\tLSTM:\tSTD test % err:\t\t{df_classic_lstm['TestPercentErrorMean'].std()}\n"
+                    f"\tLSTM:\tBest test acc:\t\t{acc_classic_lstm_max} (seed={acc_classic_lstm_max_seed})\n"
                     f"\tLSTM:\tBest test RMSE:\t\t{rmse_classic_lstm_max} (seed={rmse_classic_lstm_max_seed})\n"
                     f"\tLSTM:\tBest test % err:\t{perc_e_classic_lstm_min} (seed={perc_e_classic_lstm_min_seed})\n"
                     "\n"
@@ -140,6 +150,7 @@ def post_process_results(path_results: str):
                     f"\tTCN:\tSTD test RMSE:\t\t{df_classic_tcn['TestRMSE'].std()}\n"
                     f"\tTCN:\tAvg test % err:\t\t{df_classic_tcn['TestPercentErrorMean'].mean()}\n"
                     f"\tTCN:\tSTD test % err:\t\t{df_classic_tcn['TestPercentErrorMean'].std()}\n"
+                    f"\tTCN:\tBest test acc:\t\t{acc_classic_tcn_max} (seed={acc_classic_tcn_max_seed})\n"
                     f"\tTCN:\tBest test RMSE:\t\t{rmse_classic_tcn_max} (seed={rmse_classic_tcn_max_seed})\n"
                     f"\tTCN:\tBest test % err:\t{perc_e_classic_tcn_min} (seed={perc_e_classic_tcn_min_seed})\n"
                     "\n"
@@ -150,6 +161,7 @@ def post_process_results(path_results: str):
                     f"\tTransformer:\tSTD test RMSE:\t\t{df_classic_trans['TestRMSE'].std()}\n"
                     f"\tTransformer:\tAvg test % err:\t\t{df_classic_trans['TestPercentErrorMean'].mean()}\n"
                     f"\tTransformer:\tSTD test % err:\t\t{df_classic_trans['TestPercentErrorMean'].std()}\n"
+                    f"\tTransformer:\tBest test acc:\t\t{acc_classic_trans_max} (seed={acc_classic_trans_max_seed})\n"
                     f"\tTransformer:\tBest test RMSE:\t\t{rmse_classic_trans_max} (seed={rmse_classic_trans_max_seed})\n"
                     f"\tTransformer:\tBest test % err:\t{perc_e_classic_trans_min} (seed={perc_e_classic_trans_min_seed})\n"
                 )
