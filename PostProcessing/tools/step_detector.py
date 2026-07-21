@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-step_detector.py
+File:
+    step_detector.py
+
+Description:
+    Utility for splitting B1 datasets by step events, as well as working with
+    individual step data frames.
 
 Date:
     21 Jul 2026
 
 Version:
-    0.1.5
+    1.0.2
 """
 import argparse
 import csv
@@ -56,6 +61,14 @@ class B1Step(object):
         self.trial_label = trial_label
         self.ts_end = ts_end
         self.ts_start = ts_start
+        
+        # Generate path name from trial label, leg name, and step number; does
+        # not include output directory.
+        self.filename = "-".join([
+                self.trial_label,
+                self.leg,
+                str(self.idx_step)
+            ]) + ".csv"
 
     def plot(self):
         """
@@ -96,16 +109,11 @@ class B1Step(object):
         if (not os.path.isdir(output_dir)):
             os.mkdir(output_dir)
 
-        # Generate path name from trial label, leg name, and step number.
-        fname = "-".join([
-                self.trial_label,
-                self.leg,
-                str(self.idx_step)
-            ]) + ".csv"
-        path = os.path.join(output_dir, fname)
+        # Generate full path with output directory here.
+        path = os.path.join(output_dir, self.filename)
 
         # Save.
-        logging.debug(f"Saving step {fname} to {path}.")
+        logging.debug(f"Saving step {self.filename} to {path}.")
         self.df.to_csv(path, index=False)
 
 
@@ -115,6 +123,21 @@ _THRESHOLD_TS_MS_STEP = 500
 
 
 # Meat.
+def load_b1_step(df: pd.DataFrame, full_trial_label: str) -> B1Step:
+    """
+    load_b1_step(df, full_trial_label) -> step
+    """
+    # First get step index, leg, and trial label from full file label.
+    print(full_trial_label)
+    exit()
+    """
+            idx_step: int,
+            leg: str,
+            trial_label: str,
+            ts_end: datetime,
+            ts_start: datetime,
+    """
+
 def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
     """
     _filter_step_by_max_and_leg(df) -> ts
@@ -252,6 +275,7 @@ def get_steps_from_step_events(
             
 
 def get_steps_from_b1_df(
+        annotate_mode: bool,
         df: pd.DataFrame,
         trial_label: str,
         method: str = "knee_angle",
@@ -259,11 +283,19 @@ def get_steps_from_b1_df(
     ) -> list[B1Step]:
     """
     get_steps_from_b1_df(df) -> steps
-    print(step_events)
 
     Break a provided DataFrame into individual steps based on B1 proprioceptive
     sensor streams.
+
+    Args:
+        annotate_mode   (bool)  Annotation mode? If so, just load each DF as a
+                                step.
     """
+    if annotate_mode:
+        # When annotating, each step is a separate DF already.
+        step = load_b1_step(df=df, full_trial_label=trial_label)
+        return [step]
+
     # Start by defining method of finding "step events" within DF:
     #   * knee_angle:   When the knee reach max angle, define this as "contact".
     #   * da_dt_max:    When the local absolute vertical acceleration is
@@ -492,7 +524,22 @@ def _find_csvs(input_dir: str) -> list[str]:
     return [path for path in paths if (
         os.path.isfile(path) and path.endswith("csv"))]
 
+def annotate_steps(steps: list[B1Step], output_dir):
+    """
+    annotate_steps(steps, output_dir)
+
+    Todo:
+        Auto-delete flagged files.
+    """
+    path = "/".join([output_dir, step.filename])
+    for step in steps:
+        logging.info(f"Now displaying plot for {path}:")
+        step.plot()
+        logging.info("")
+    
+
 def step_detector(
+        annotate_mode: bool,
         input_path: str,
         output_dir: str,
         plotting: bool
@@ -516,14 +563,22 @@ def step_detector(
         #print_df_stats(df)
         #extract_steps_from_df(df)
         steps = get_steps_from_b1_df(
+                annotate_mode=annotate_mode,
                 df=df,
                 plotting=plotting,
                 trial_label=trial_label
             )
 
-        logging.info(f"Saving {len(steps)} steps.")
-        [step.save(output_dir=output_dir) for step in steps]
-        logging.info("DONE.")
+        if annotate_mode:
+            # Plot each found step to allow for use modifications.
+            logging.info(f"Annotating steps from {trial_label}")
+            annotate_steps(steps=steps, output_dir=output_dir)
+            logging.info("DONE.")
+        else:
+            # Save all steps.
+            logging.info(f"Saving {len(steps)} steps.")
+            [step.save(output_dir=output_dir) for step in steps]
+            logging.info("DONE.")
 
 
 if __name__ == "__main__":
@@ -552,9 +607,15 @@ if __name__ == "__main__":
             action="store_true",
             help="Enable plotting previews for steps from each digested file?"
         )
+    parser.add_argument(
+            "--annotate",
+            action="store_true",
+            help="Load and filter existing steps based on plot appearance?"
+        )
     args = parser.parse_args()
 
     step_detector(
+            annotate_mode=args.annotate,
             input_path=args.input_path,
             output_dir=args.output_dir,
             plotting=args.plotting
