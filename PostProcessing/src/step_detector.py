@@ -275,9 +275,9 @@ def get_steps_from_step_events(
             
 
 def get_steps_from_b1_df(
-        annotate_mode: bool,
         df: pd.DataFrame,
         trial_label: str,
+        annotate_mode: bool = False,
         method: str = "knee_angle",
         plotting: bool = False
     ) -> list[B1Step]:
