@@ -178,7 +178,7 @@ def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
 
     return step_ts
 
-def find_steps_by_knee_angle(df: pd.DataFrame) -> dict:
+def find_steps_by_knee_angle(df: pd.DataFrame, step_len: int) -> dict:
     """
     find_steps_by_knee_angle(df) -> step_event_times
 
@@ -219,7 +219,7 @@ def find_steps_by_knee_angle(df: pd.DataFrame) -> dict:
     }
 
 
-def find_steps_by_da_dt_max(df: pd.DataFrame) -> tuple[datetime]:
+def find_steps_by_da_dt_max(df: pd.DataFrame, step_len: int) -> tuple[datetime]:
     """
     find_steps_by_da_dt_max(df) -> step_event_times
     """
@@ -229,6 +229,7 @@ def find_steps_by_da_dt_max(df: pd.DataFrame) -> tuple[datetime]:
 def get_steps_from_step_events(
         df: pd.DataFrame,
         leg_events: dict,
+        step_len: int,
         trial_label: str,
         plotting: bool = False
     ) -> list[B1Step]:
@@ -246,6 +247,10 @@ def get_steps_from_step_events(
         for idx_step, event in enumerate(events):
             # Find the start/end timestamps for each event (small overlaps
             # okay).
+            idx_event = df.loc["Timestamp (Epoch-UTC-ms)"][idx_event]
+            print(idx_event)
+            exit()
+
             ts_start = event - (_THRESHOLD_TS_MS_STEP * 2)
             ts_end = event + (_THRESHOLD_TS_MS_STEP * 2)
 
@@ -276,6 +281,7 @@ def get_steps_from_step_events(
 
 def get_steps_from_b1_df(
         df: pd.DataFrame,
+        step_len: int,
         trial_label: str,
         annotate_mode: bool = False,
         method: str = "knee_angle",
@@ -316,6 +322,7 @@ def get_steps_from_b1_df(
     steps = get_steps_from_step_events(
         df=df,
         leg_events=step_events,
+        step_len=step_len,
         trial_label=trial_label
     )
     logging.info(f"Detected {len(steps)} steps in {trial_label}.")
@@ -542,7 +549,8 @@ def step_detector(
         annotate_mode: bool,
         input_path: str,
         output_dir: str,
-        plotting: bool
+        plotting: bool,
+        step_len: int
     ):
     """
     step_detector(input_dir, output_dir, plotting)
@@ -566,6 +574,7 @@ def step_detector(
                 annotate_mode=annotate_mode,
                 df=df,
                 plotting=plotting,
+                step_len=step_len,
                 trial_label=trial_label
             )
 
@@ -612,11 +621,19 @@ if __name__ == "__main__":
             action="store_true",
             help="Load and filter existing steps based on plot appearance?"
         )
+    parser.add_argument(
+            "--step-len",
+            type=int,
+            default=500,
+            help=("Number of time steps per robot step window (each timestamp "
+                  "is 2ms apart, so default of 500 == 1s).")
+        )
     args = parser.parse_args()
 
     step_detector(
             annotate_mode=args.annotate,
             input_path=args.input_path,
             output_dir=args.output_dir,
-            plotting=args.plotting
+            plotting=args.plotting,
+            step_len=args.step_len
         )

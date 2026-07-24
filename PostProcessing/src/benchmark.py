@@ -82,6 +82,7 @@ class TrainingConfig:
         ...
     """
     no_cuda: bool
+    num_steps: int
     target: str
     batch_size: int = 32 
     classic_mode: bool = False
@@ -912,6 +913,7 @@ def run_benchmark(
         data_dir: str,
         debug_mode: bool,
         models: list[str],
+        num_steps: int,
         output_dir: Path,
         seed: int,
         stride: int,
@@ -938,6 +940,7 @@ def run_benchmark(
     #               by steps.
     data_bundle = build_data_bundle(
             data_dir=data_dir,
+            num_steps=num_steps,
             seed=seed,
             stride=stride,
             target=target,
@@ -1043,6 +1046,7 @@ def benchmark(
         models: list[str],
         n_evals: int,
         no_cuda: bool,
+        num_steps: int,
         output_dir: Path,
         patience: float,
         seed: int,
@@ -1079,6 +1083,7 @@ def benchmark(
             epochs=epochs,
             lr=lr,
             no_cuda=no_cuda,
+            num_steps=num_steps,
             patience=patience,
             target=target,
             weight_decay=weight_decay
@@ -1090,6 +1095,7 @@ def benchmark(
             data_dir=data_dir,
             debug_mode=debug_mode,
             models=models,
+            num_steps=num_steps,
             output_dir=output_dir,
             seed=seed+i,
             stride=stride,
@@ -1248,6 +1254,13 @@ if __name__ == "__main__":
             action="store_true",
             help=("Enable debug mode.")
         )
+    parser.add_argument(
+            "--num-steps",
+            type=int,
+            default=-1,
+            help=("Number of steps per trial; 0 uses a sliding window, -1 uses "
+                  "all available steps found.")
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -1272,6 +1285,7 @@ if __name__ == "__main__":
             models=args.models,
             n_evals=args.n,
             no_cuda=args.no_cuda,
+            num_steps=args.num_steps,
             output_dir=args.output_dir,
             patience=args.patience,
             seed=args.seed,

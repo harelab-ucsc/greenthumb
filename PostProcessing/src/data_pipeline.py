@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    6 Jul 2026
+    23 Jul 2026
 
 Version:
-    1.0.6
+    1.0.7
 """
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
 import warnings
+
+from step_detector import get_steps_from_b1_df
 
 
 # NOTE / TODO: Currently, each "combined.csv" dataset needs to be:
@@ -308,17 +310,21 @@ def _get_df_labels(df: pd.DataFrame, target: str) -> Tuple[
 
     return labels, idx_compaction, idx_wetness, trial
 
-def _segment_trial_combined(
+def _segment_trial_by_steps(
         df: pd.DataFrame,
         num_steps: int,
+        step_len: int,
+        trial_label: str
     ) -> Tuple[List[np.ndarray], int]:
     """
-    _segment_trial_combined(df, num_steps) -> (segments, step_len)
+    _segment_trial_by_steps(df, num_steps) -> (segments, step_len)
 
     Aligns a trial by truncating to the shared number of steps.
 
     Note:
-        Why does each trial have different step sizes?
+        Is this wise? What happens if each trial has different numbers of steps?
+    """
+    # TODO: Make num_steps do stuff.
     """
     min_len = len(df)
     if min_len < num_steps:
@@ -327,37 +333,25 @@ def _segment_trial_combined(
         )
     seg_len = min_len // num_steps
     usable_len = seg_len * num_steps
+    """
 
-    # Create lists of feature names.
+    # Split trial's DF into smaller DFs for each step.
+    steps = get_steps_from_b1_df(
+            df=df,
+            trial_label=trial_label,
+            step_len=step_len
+        )
+
+    # Only include desired features (omit timestamps, etc).
     imu_cols = list(FEATURES_IMU)
     jtorque_cols = list(FEATURES_JTORQUE)
     jangle_cols = list(FEATURES_JANGLE)
     vwc_cols = list(FEATURES_VWC)
 
-    # Combine sensor values into a numpy array of the largest size that can be
-    # cleanly divided into `num_steps` segments.
-    imu_values = df.loc[:usable_len-1, imu_cols].to_numpy(dtype=np.float32)
-    jtorque_values = df.loc[:usable_len-1, jtorque_cols].to_numpy(
-            dtype=np.float32)
-    jangle_values = df.loc[:usable_len-1, jangle_cols].to_numpy(
-            dtype=np.float32)
-    vwc_values = df.loc[:usable_len-1, vwc_cols].to_numpy(dtype=np.float32)
-    combined = np.concatenate([
-            imu_values,
-            jtorque_values,
-            jangle_values,
-            vwc_values
-        ], axis=1)
+    dfs_steps = [step.df[imu_cols + jtorque_cols + jangle_cols + vwc_cols]
+                 for step in steps]
 
-    segments: List[np.ndarray] = []
-
-    # Cleanly divide the DataFrame into segments.
-    for seg_idx in range(num_steps):
-        start = seg_idx * seg_len
-        end = start + seg_len
-        segments.append(combined[start:end])
-
-    return segments, seg_len
+    return dfs_steps, step_len
 
 def _window_segment(
         segment: np.ndarray,
@@ -423,9 +417,11 @@ def _load_raw_b1_dataset(
             )
         
         # Split DFs into temporal data segments.
-        segments, segment_len = _segment_trial_combined(
+        segments, segment_len = _segment_trial_by_steps(
                 df=df,
-                num_steps=num_steps
+                num_steps=num_steps,
+                step_len=window_size,
+                trial_label=trial
             )
 
         # NOTE: "step" == "segement".
@@ -633,6 +629,7 @@ def _compute_label_stats(
 
 def build_data_bundle(
         data_dir: str,
+        num_steps: int,
         seed: int = 13,
         stride: int | None = None,
         target: str = "spr",
@@ -654,6 +651,8 @@ def build_data_bundle(
     # Start by loading the selected datasets.
     raw = load_raw_dataset(
         data_dir=data_dir,
+        num_steps=num_steps,
+        step_len=step_len,
         stride=stride,
         target=target.lower(),
         window_size=window_size
