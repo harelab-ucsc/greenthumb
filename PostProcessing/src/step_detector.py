@@ -247,10 +247,6 @@ def get_steps_from_step_events(
         for idx_step, event in enumerate(events):
             # Find the start/end timestamps for each event (small overlaps
             # okay).
-            idx_event = df.loc["Timestamp (Epoch-UTC-ms)"][idx_event]
-            print(idx_event)
-            exit()
-
             ts_start = event - (_THRESHOLD_TS_MS_STEP * 2)
             ts_end = event + (_THRESHOLD_TS_MS_STEP * 2)
 
@@ -316,7 +312,7 @@ def get_steps_from_b1_df(
         }
 
     # Gather timestamps for each leg.
-    step_events = lut_step_isolator[method](df=df)
+    step_events = lut_step_isolator[method](df=df, step_len=step_len)
 
     # Convert step events into steps.
     steps = get_steps_from_step_events(

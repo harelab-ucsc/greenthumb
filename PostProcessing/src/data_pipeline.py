@@ -356,7 +356,7 @@ def _segment_trial_by_steps(
     Note:
         Is this wise? What happens if each trial has different numbers of steps?
     """
-    # TODO: Make num_steps do stuff.
+    # TODO: Add back windowing.
     """
     min_len = len(df)
     if min_len < num_steps:
@@ -383,9 +383,15 @@ def _segment_trial_by_steps(
     cols += list(FEATURES_D2JANGLE)
     cols += list(FEATURES_VWC)
 
-    dfs_steps = [step.df[cols] for step in steps]
+    dfs_steps = [step.df[cols].to_numpy() for step in steps]
+    
+    # Select number of steps based on the argument provided.
+    if (num_steps == -1 or len(steps) <= num_steps):
+        # Use all found steps if specified or not enough are available.
+        return dfs_steps, step_len
 
-    return dfs_steps, step_len
+    # Else, return the specified number of steps.
+    return dfs_steps[:num_steps], step_len
 
 def _window_segment(
         segment: np.ndarray,
@@ -502,6 +508,7 @@ def load_raw_dataset(
         data_dir: str,
         num_trials: int = 10,
         num_steps: int = 8,
+        step_len: int = 1000,
         stride: int | None = None,
         target: str = "spr",
         window_size: int | None = None,
@@ -512,6 +519,8 @@ def load_raw_dataset(
     Parses and aligns the CSV files into per-step sequences of IMU quaternions,
     joint angles, and joint torques.
     """
+    # TODO: Step length and window size are the same currently (under most
+    #       conditions.
     sequences: List[np.ndarray] = []
     labels: List[List[int]] = []
     lengths: List[int] = []
@@ -539,6 +548,8 @@ def load_raw_dataset(
     # TODO(nubby): Can this be merged in earlier for efficiency?
     feature_names += list(FEATURES_JTORQUE)
     feature_names += list(FEATURES_JANGLE)
+    feature_names += list(FEATURES_DJANGLE)
+    feature_names += list(FEATURES_D2JANGLE)
     feature_names += list(FEATURES_VWC)
     feature_names += list(FEATURES_IMU)
 
@@ -682,6 +693,9 @@ def build_data_bundle(
     Todo:
         * Make SWC as a label/feature selectable.
     """
+    # Default step length to 1000 samples.
+    step_len = window_size if window_size else 1000
+
     # Start by loading the selected datasets.
     raw = load_raw_dataset(
         data_dir=data_dir,
