@@ -6,10 +6,10 @@ Author:
     Taylor Kergan
 
 Date:
-    23 Jul 2026
+    4 Aug 2026
 
 Version:
-    1.0.7
+    1.0.8
 """
 from __future__ import annotations
 
@@ -95,6 +95,38 @@ FEATURES_JANGLE: Sequence[str] = (
         "RLHipQ (rad)",
         "RLThighQ (rad)",
         "RLKneeQ (rad)",
+    )
+
+# Joint angle velocity features.
+FEATURES_DJANGLE: Sequence[str] = (
+        "FRHipdQ (rps)",
+        "FRThighdQ (rps)",
+        "FRKneedQ (rps)",
+        "FLHipdQ (rps)",
+        "FLThighdQ (rps)",
+        "FLKneedQ (rps)",
+        "RRHipdQ (rps)",
+        "RRThighdQ (rps)",
+        "RRKneedQ (rps)",
+        "RLHipdQ (rps)",
+        "RLThighdQ (rps)",
+        "RLKneedQ (rps)",
+    )
+
+# Joint angle acceleration features.
+FEATURES_D2JANGLE: Sequence[str] = (
+        "FRHipd2Q (rps^2)",
+        "FRThighd2Q (rps^2)",
+        "FRKneed2Q (rps^2)",
+        "FLHipd2Q (rps^2)",
+        "FLThighd2Q (rps^2)",
+        "FLKneed2Q (rps^2)",
+        "RRHipd2Q (rps^2)",
+        "RRThighd2Q (rps^2)",
+        "RRKneed2Q (rps^2)",
+        "RLHipd2Q (rps^2)",
+        "RLThighd2Q (rps^2)",
+        "RLKneed2Q (rps^2)",
     )
 
 # Joint torque features.
@@ -343,13 +375,15 @@ def _segment_trial_by_steps(
         )
 
     # Only include desired features (omit timestamps, etc).
-    imu_cols = list(FEATURES_IMU)
-    jtorque_cols = list(FEATURES_JTORQUE)
-    jangle_cols = list(FEATURES_JANGLE)
-    vwc_cols = list(FEATURES_VWC)
+    cols = []
+    cols += list(FEATURES_IMU)
+    cols += list(FEATURES_JTORQUE)
+    cols += list(FEATURES_JANGLE)
+    cols += list(FEATURES_DJANGLE)
+    cols += list(FEATURES_D2JANGLE)
+    cols += list(FEATURES_VWC)
 
-    dfs_steps = [step.df[imu_cols + jtorque_cols + jangle_cols + vwc_cols]
-                 for step in steps]
+    dfs_steps = [step.df[cols] for step in steps]
 
     return dfs_steps, step_len
 
