@@ -160,6 +160,41 @@ def set_up(
 
     return device
 
+def save_trial_splits(
+        assignment: Dict,
+        output_dir: Path,
+        seed: int,
+        training_config: TrainingConfig
+    ):
+    """
+    save_trial_splits(data_bundle, output_dir, training_config)
+
+    Save splits from a given seed.
+    """
+    # First, create a "splits" directory if it does not already exist.
+    splits_dir = output_dir / "splits"
+    splits_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extract information to create a full path.
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    path = splits_dir / ("-".join([ts, str(seed), "splits"]) + ".csv")
+
+    # Next, add a header line.
+    header = ",".join([
+        "Trial Label",
+        "Number of Steps Used",
+        "Split"
+    ]) + "\n"
+    with open(path, "a+") as sp:
+        sp.write(header)
+
+    # Last, write which dataset was used in which split.
+    for key in assignment.keys():
+        line = f"{key[2]},{assignment[key]}\n"
+        with open(path, "a+") as sp:
+            sp.write(line)
+
 def run_epoch(
         model: nn.Module,
         dataloader: torch.utils.data.DataLoader,
@@ -920,6 +955,7 @@ def run_benchmark(
         target: str,
         training_config: TrainingConfig,
         wandb_config: WandbConfig,
+        wet: bool,
         window_size: int,
     ):
     """
@@ -938,12 +974,13 @@ def run_benchmark(
     # different random seed for thoroughness).
     # TODO(nubby):  Further divide individual trials, either by a fixed size or
     #               by steps.
-    data_bundle = build_data_bundle(
+    data_bundle, split_assignment = build_data_bundle(
             data_dir=data_dir,
             num_steps=num_steps,
             seed=seed,
             stride=stride,
             target=target,
+            wet=wet,
             window_size=window_size
         )
     # Extract mean/STD from training set for later use.
@@ -951,6 +988,15 @@ def run_benchmark(
     training_config.train_std = data_bundle.train_std
 
     input_dim = len(data_bundle.feature_names)
+
+    # Save trial splits.
+    save_trial_splits(
+            assignment=split_assignment,
+            output_dir=output_dir,
+            seed=seed,
+            training_config=training_config
+        )
+
     # Number of soil layers to predict (from the top layer down).
     soil_layers = 1
 
@@ -1059,6 +1105,7 @@ def benchmark(
         wandb_project: str,
         wandb_run_prefix: str,
         weight_decay: float,
+        wet: bool,
         window_size: int,
         verbose: bool = False
     ):
@@ -1102,6 +1149,7 @@ def benchmark(
             target=target,
             training_config=training_config,
             wandb_config=wandb_config,
+            wet=wet,
             window_size=window_size,
         )
 
@@ -1261,6 +1309,12 @@ if __name__ == "__main__":
             help=("Number of steps per trial; 0 uses a sliding window, -1 uses "
                   "all available steps found.")
         )
+    parser.add_argument(
+            "--wet",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help=("Use VWC as a feature in training.")
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -1298,5 +1352,6 @@ if __name__ == "__main__":
             wandb_project=args.wandb_project,
             wandb_run_prefix=args.wandb_run_prefix,
             weight_decay=args.weight_decay,
+            wet=args.wet,
             window_size=args.window_size,
         )

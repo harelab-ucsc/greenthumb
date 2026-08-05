@@ -62,7 +62,10 @@ FEATURES_IMU: Sequence[str] = (
         "IMUQw",
         "IMUQx",
         "IMUQy",
-        "IMUQz"
+        "IMUQz",
+        "IMUAccx",
+        "IMUAccy",
+        "IMUAccz"
     )
 
 # Ground reaction force features.
@@ -346,7 +349,8 @@ def _segment_trial_by_steps(
         df: pd.DataFrame,
         num_steps: int,
         step_len: int,
-        trial_label: str
+        trial_label: str,
+        wet: bool = True
     ) -> Tuple[List[np.ndarray], int]:
     """
     _segment_trial_by_steps(df, num_steps) -> (segments, step_len)
@@ -381,7 +385,8 @@ def _segment_trial_by_steps(
     cols += list(FEATURES_JANGLE)
     cols += list(FEATURES_DJANGLE)
     cols += list(FEATURES_D2JANGLE)
-    cols += list(FEATURES_VWC)
+    if wet:
+        cols += list(FEATURES_VWC)
 
     dfs_steps = [step.df[cols].to_numpy() for step in steps]
     
@@ -427,6 +432,7 @@ def _load_raw_b1_dataset(
         num_steps: int = 8,
         stride: int | None = None,
         target: str = "spr",
+        wet: bool = True,
         window_size: int | None = None,
     ) -> Tuple[
             List[np.ndarray],
@@ -461,7 +467,8 @@ def _load_raw_b1_dataset(
                 df=df,
                 num_steps=num_steps,
                 step_len=window_size,
-                trial_label=trial
+                trial_label=trial,
+                wet=wet
             )
 
         # NOTE: "step" == "segement".
@@ -511,6 +518,7 @@ def load_raw_dataset(
         step_len: int = 1000,
         stride: int | None = None,
         target: str = "spr",
+        wet: bool = True,
         window_size: int | None = None,
     ) -> RawSequenceDataset:
     """
@@ -537,6 +545,7 @@ def load_raw_dataset(
             num_steps=num_steps,
             stride=stride,
             target=target,
+            wet=wet,
             window_size=window_size,
         )
     sequences += raw[0]
@@ -550,7 +559,8 @@ def load_raw_dataset(
     feature_names += list(FEATURES_JANGLE)
     feature_names += list(FEATURES_DJANGLE)
     feature_names += list(FEATURES_D2JANGLE)
-    feature_names += list(FEATURES_VWC)
+    if wet:
+        feature_names += list(FEATURES_VWC)
     feature_names += list(FEATURES_IMU)
 
     #labels=np.asarray(labels, dtype=np.int64),
@@ -608,6 +618,8 @@ def _assign_trial_splits(
     #               would also split up temporally linked datasets, which may
     #               be undesireable.
     # First group trials under compaction events and soil wetness events.
+    by_step = False     # Set to True to make splits by number of steps.
+    by_scene = False    # Set to True to group datasets from the same scene.
     by_key: Dict[Tuple[int, int], List[int]] = {}
     for meta in metadata:
         key = (meta.idx_compaction, meta.idx_wetness)
@@ -616,27 +628,65 @@ def _assign_trial_splits(
         if meta.trial not in by_key[key]:
             by_key[key].append(meta.trial)
 
+    # Intelligently divide trials by number of steps in each scenario.
+    division: Dict[Tuple[int, int], int] = {}
+    for key in by_key.keys():
+        # Get the number of total entries for each key.
+        n = len([
+            meta for meta in metadata if key == (
+                meta.idx_compaction, meta.idx_wetness
+            )])
+        division[key] = n
+    
+    # From total number of steps, find number of steps to provide for each
+    # split.
+    """
+    total_steps = sum([division[key] for key in division.keys()])
+    train_steps = np.ceil(total_steps * train_frac)
+    val_steps = np.floor(total_steps * val_frac)
+    """
     # Assign trials from each compaction/wetness level randomly to splits.
     assignment: Dict[Tuple[int, int, str], str] = {}
-    for key, trials in by_key.items():
-        # Randomly shuffle trials for each key value, then split accordingly.
-        trials_copy = list(trials)
-        rng.shuffle(trials_copy)
+    if not by_scene:
+        for key, trials in by_key.items():
+            # Randomly shuffle trials for each key value, then split accordingly.
+            trials_copy = list(trials)
+            rng.shuffle(trials_copy)
+            train_count, val_count, _ = _compute_split_counts(
+                    len(trials_copy), train_frac, val_frac
+                )
+            train_trials = set(trials_copy[:train_count])
+            val_trials = set(trials_copy[train_count : train_count + val_count])
+            for trial in trials:
+                if trial in train_trials:
+                    assignment[(key[0], key[1], trial)] = "train"
+                elif trial in val_trials:
+                    assignment[(key[0], key[1], trial)] = "val"
+                else:
+                    assignment[(key[0], key[1], trial)] = "test"
+    else:
+        # If grouping by scenario (indexed by (SWC, compaction index)), assign
+        # by key rather than by trial.
+        keys = list(by_key.keys())
+        # Randomly shuffle keys (each "scenario"), then split accordingly.
+        rng.shuffle(keys)
         train_count, val_count, _ = _compute_split_counts(
-                len(trials_copy), train_frac, val_frac
+                len(keys), train_frac, val_frac
             )
-        train_trials = set(trials_copy[:train_count])
-        val_trials = set(trials_copy[train_count : train_count + val_count])
-        for trial in trials:
-            if trial in train_trials:
-                assignment[(key[0], key[1], trial)] = "train"
-            elif trial in val_trials:
-                assignment[(key[0], key[1], trial)] = "val"
+        train_keys = set(keys[:train_count])
+        val_keys = set(keys[train_count : train_count + val_count])
+        for key, trials in by_key.items():
+            if key in train_keys:
+                for trial in trials:
+                    assignment[(key[0], key[1], trial)] = "train"
+            elif key in val_keys:
+                for trial in trials:
+                    assignment[(key[0], key[1], trial)] = "val"
             else:
-                assignment[(key[0], key[1], trial)] = "test"
+                for trial in trials:
+                    assignment[(key[0], key[1], trial)] = "test"
 
     return assignment
-
 
 def _compute_feature_stats(
         sequences: Sequence[np.ndarray],
@@ -680,8 +730,9 @@ def build_data_bundle(
         target: str = "spr",
         train_frac: float = 0.6,
         val_frac: float = 0.2,
+        wet: bool = True,
         window_size: int | None = None
-    ) -> FullDataBundle:
+    ) -> Tuple[FullDataBundle, Dict]:
     """
     build_data_bundle(...) -> FullDataBundle
 
@@ -693,6 +744,7 @@ def build_data_bundle(
     Todo:
         * Make SWC as a label/feature selectable.
     """
+    print(wet)
     # Default step length to 1000 samples.
     step_len = window_size if window_size else 1000
 
@@ -703,6 +755,7 @@ def build_data_bundle(
         step_len=step_len,
         stride=stride,
         target=target.lower(),
+        wet=wet,
         window_size=window_size
     )
 
@@ -789,4 +842,4 @@ def build_data_bundle(
         feature_names=raw.feature_names,
         train_mean=labels_mean,
         train_std=labels_std,
-    )
+    ), assignment

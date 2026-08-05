@@ -160,6 +160,7 @@ class TemporalConvNetEstimator(nn.Module):
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         features = self.tcn(inputs)
+        # TODO: Replace with something that preserves temporal encoding.
         pooled = masked_mean(features, lengths)
         return self.head(pooled)
 
@@ -250,5 +251,6 @@ class TransformerEstimator(nn.Module):
         projected = self.input_projection(inputs)
         encoded = self.positional_encoding(projected)
         encoded = self.encoder(encoded, src_key_padding_mask=mask)
+        # TODO: Replace with something that preserves temporal encoding.
         pooled = masked_mean(encoded, lengths)
         return self.head(pooled)
