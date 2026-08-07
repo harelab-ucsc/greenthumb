@@ -26,7 +26,9 @@ import torch.nn as nn
 
 
 def masked_mean(sequence: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-    """Computes a length-aware mean along the time dimension."""
+    """
+    Computes a length-aware mean along the time dimension.
+    """
     if sequence.dim() != 3:
         raise ValueError("Expected sequence tensor of shape (batch, time, features).")
     batch_size, max_time, _ = sequence.shape
@@ -160,8 +162,12 @@ class TemporalConvNetEstimator(nn.Module):
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         features = self.tcn(inputs)
+        print(features[0][0])
+        print(len(features[0][0]))
         # TODO: Replace with something that preserves temporal encoding.
         pooled = masked_mean(features, lengths)
+        print(pooled)
+        exit()
         return self.head(pooled)
 
 
@@ -211,7 +217,7 @@ class TransformerEstimator(nn.Module):
         d_model: int = 64,
         num_heads: int = 8,
         num_layers: int = 2,
-        dim_feedforward: int = 16,
+        dim_feedforward: int = 256,
         dropout: float = 0.1,
         num_classes: int = 3,
         max_chunk_len: int = 2000

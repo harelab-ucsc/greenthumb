@@ -744,7 +744,6 @@ def build_data_bundle(
     Todo:
         * Make SWC as a label/feature selectable.
     """
-    print(wet)
     # Default step length to 1000 samples.
     step_len = window_size if window_size else 1000
 
