@@ -6,14 +6,14 @@ Description:
     Temporally-encoded models with regression heads.
 
 Authors:
-    Taylor Kergan
     nubby
+    Taylor Kergan
 
 Date:
-    6 Jul 2026
+    6 Aug 2026
 
 Version:
-    1.0.2
+    1.1.0
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class LSTMEstimator(nn.Module):
         hidden_dim: int = 128,
         num_layers: int = 3,
         dropout: float = 0.2,
-        num_classes: int = 3,
+        num_targets: int = 3,
     ) -> None:
         super().__init__()
         bidirectional = True
@@ -68,7 +68,7 @@ class LSTMEstimator(nn.Module):
         self.head = nn.Sequential(
             nn.LayerNorm(hidden_dim * 2),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, num_classes),
+            nn.Linear(hidden_dim * 2, num_targets),
         )
 
     def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
@@ -140,6 +140,30 @@ class TemporalConvNet(nn.Module):
         out = self.network(x)
         return out.transpose(1, 2)  # back to (batch, time, features)
 
+class AttentivePooler(nn.Module):
+    """
+    AttentivePooler
+
+    Cute attention head to learn which timesteps matter for compaction
+    estimation.
+    """
+    def __init__(self, dim: int):
+        super().__init__()
+        self.score = nn.Linear(dim, 1)
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            lengths: torch.Tensor
+        ) -> torch.Tensor:
+        scores = self.score(x).squeeze(-1)      #   (B, T).
+        mask = torch.arange(
+                x.size(1), device=x.device
+            ).expand(x.size(0), x.size(1)) >= lengths.unsqueeze(1)
+        scores = scores.masked_fill(mask, float("-inf"))
+        weights = torch.softmax(scores, dim=1)  #   (B, T).
+        pooled = (x * weights.unsqueeze(-1)).sum(dim=1)
+        return pooled
 
 class TemporalConvNetEstimator(nn.Module):
     """Estimator head on top of a TCN backbone."""
@@ -150,24 +174,32 @@ class TemporalConvNetEstimator(nn.Module):
         hidden_dim: int = 160,
         num_layers: int = 3,
         dropout: float = 0.1,
-        num_classes: int = 3,
+        num_targets: int = 3,
     ) -> None:
         super().__init__()
-        self.tcn = TemporalConvNet(input_dim, hidden_dim, num_layers, dropout=dropout)
+        self.tcn = TemporalConvNet(
+                input_dim,
+                hidden_dim,
+                num_layers,
+                dropout=dropout
+            )
+        # Pool using per-timestep attention to respect temporal alignment (e.g.
+        # capture dynamic response of EAOT making contact with soil).
+        self.pool = AttentivePooler(dim=hidden_dim)
         self.head = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_classes),
+            nn.Linear(hidden_dim, num_targets),
         )
 
-    def forward(self, inputs: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        features = self.tcn(inputs)
-        print(features[0][0])
-        print(len(features[0][0]))
-        # TODO: Replace with something that preserves temporal encoding.
-        pooled = masked_mean(features, lengths)
-        print(pooled)
-        exit()
+    def forward(
+            self,
+            inputs: torch.Tensor,
+            lengths: torch.Tensor
+        ) -> torch.Tensor:
+        features = self.tcn(inputs)             #   (B, T, H).
+        # Pool as we go.
+        pooled = self.pool(features, lengths)
         return self.head(pooled)
 
 
@@ -219,7 +251,7 @@ class TransformerEstimator(nn.Module):
         num_layers: int = 2,
         dim_feedforward: int = 256,
         dropout: float = 0.1,
-        num_classes: int = 3,
+        num_targets: int = 3,
         max_chunk_len: int = 2000
     ) -> None:
         super().__init__()
@@ -238,10 +270,11 @@ class TransformerEstimator(nn.Module):
                 dropout=dropout,
                 max_len=max_chunk_len
             )
+        self.pool = AttentivePooler(dim=d_model)
         self.head = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Dropout(dropout),
-            nn.Linear(d_model, num_classes),
+            nn.Linear(d_model, num_targets),
         )
 
     def forward(
@@ -257,6 +290,6 @@ class TransformerEstimator(nn.Module):
         projected = self.input_projection(inputs)
         encoded = self.positional_encoding(projected)
         encoded = self.encoder(encoded, src_key_padding_mask=mask)
-        # TODO: Replace with something that preserves temporal encoding.
-        pooled = masked_mean(encoded, lengths)
+        # Pool as we go.
+        pooled = self.pool(encoded, lengths)
         return self.head(pooled)

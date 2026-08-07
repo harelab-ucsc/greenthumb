@@ -1002,14 +1002,14 @@ def run_benchmark(
 
     # Set up models.
     available_models = {
-        "lstm": LSTMEstimator(input_dim=input_dim, num_classes=soil_layers),
+        "lstm": LSTMEstimator(input_dim=input_dim, num_targets=soil_layers),
         "tcn": TemporalConvNetEstimator(
             input_dim=input_dim,
-            num_classes=soil_layers
+            num_targets=soil_layers
         ),
         "transformer": TransformerEstimator(
             input_dim=input_dim,
-            num_classes=soil_layers,
+            num_targets=soil_layers,
             max_chunk_len=window_size
         )
     }
