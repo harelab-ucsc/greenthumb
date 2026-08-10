@@ -36,7 +36,7 @@ from data_pipeline import build_data_bundles, FullDataBundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
 # Library configs.
-#matplotlib.use("Agg")
+matplotlib.use("Agg")
 logger = logging.getLogger("greenthumb")
 
 
@@ -684,24 +684,26 @@ def save_plots(
 
     if history.epoch_indices:
         with plt.style.context("seaborn-v0_8"):
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+            fig, axes = plt.subplots(1, 1, figsize=(12, 4))
 
-            axes[0].plot(history.epoch_indices, history.train_epoch_loss, marker="o", label="Train")
-            axes[0].plot(history.epoch_indices, history.val_epoch_loss, marker="o", label="Validation")
-            axes[0].set_xlabel("Epoch")
-            axes[0].set_ylabel("Cross-Entropy Loss")
-            axes[0].set_title(f"{model_name.upper()} Loss")
-            axes[0].grid(True, which="both", linestyle="--", linewidth=0.5)
-            axes[0].legend()
+            axes.plot(history.epoch_indices, history.train_epoch_loss, marker="o", label="Train")
+            #axes.plot(history.epoch_indices, history.val_epoch_loss, marker="o", label="Validation")
+            axes.set_xlabel("Epoch")
+            axes.set_ylabel("RMSE Loss")
+            axes.set_title(f"{model_name.upper()} Loss")
+            axes.grid(True, which="both", linestyle="--", linewidth=0.5)
+            axes.legend()
 
+            """
             axes[1].plot(history.epoch_indices, history.train_epoch_acc, marker="o", label="Train")
-            axes[1].plot(history.epoch_indices, history.val_epoch_acc, marker="o", label="Validation")
+            #axes[1].plot(history.epoch_indices, history.val_epoch_acc, marker="o", label="Validation")
             axes[1].set_xlabel("Epoch")
             axes[1].set_ylabel("Accuracy")
             axes[1].set_title(f"{model_name.upper()} Accuracy")
             axes[1].set_ylim(0.0, 1.05)
             axes[1].grid(True, which="both", linestyle="--", linewidth=0.5)
             axes[1].legend()
+            """
 
             fig.tight_layout()
             fig.savefig(model_dir / f"{label}_{model_name}_epoch_metrics.png", dpi=300, bbox_inches="tight")
@@ -1011,44 +1013,58 @@ def analyze_benchmark_results(
         results: List[Dict[str, Dict[str, float]]],
         seed: int
     ):
-    n = len(results)
-    rmses = [trial["test_rmse"] for _, trial in results.items()]
-    rmse_avg = np.mean(rmses)
-    rmse_median = np.median(rmses)
-    rmse_std = np.std(rmses)
-    logger.info(
-        f"{str(seed)} | "
-        f"| n={n} "
-        f"| rmse_avg={rmse_avg:.4f} "
-        f"| rmse_median={rmse_median:.4f} "
-        f"| rmse_std={rmse_std:.4f} "
-    )
-
-    # Save output.
+    # To save output.
     path = output_dir / "results.csv"
 
-    # Next, add a header line.
-    if not path.exists():
-        header = ",".join([
-            "Seed",
-            "N",
-            "RMSE (mean)",
-            "RMSE (median)",
-            "RMSE (std)"
-        ]) + "\n"
-        with open(path, "a+") as sp:
-            sp.write(header)
+    n = len(results)
 
-    # Last, write results.
-    line = ",".join([
-        f"{str(seed)}",
-        f"{n}",
-        f"{rmse_avg:.4f}",
-        f"{rmse_median:.4f}",
-        f"{rmse_std:.4f}"
-    ])
-    with open(path, "a+") as rp:
-        rp.write(line)
+    # First gather RMSE from each fold.
+    rmses = {}
+    for result in results:
+        for model, metrics in result.items():
+            # Add new array if not already added.
+            if model not in rmses.keys():
+                rmses[model] = []
+            rmses[model].append(metrics["test_rmse"])
+
+    # Now get statistics for each model.
+    print(rmses)
+    for model, vals in rmses.items():
+        rmse_avg = np.mean(vals)
+        rmse_median = np.median(vals)
+        rmse_std = np.std(vals)
+        logger.info(
+            f"{str(seed)} | {model}"
+            f"| n={n} "
+            f"| rmse_avg={rmse_avg:.4f} "
+            f"| rmse_median={rmse_median:.4f} "
+            f"| rmse_std={rmse_std:.4f} "
+        )
+
+        # Next, add a header line.
+        if not path.exists():
+            header = ",".join([
+                "ModelName",
+                "Seed",
+                "N",
+                "RMSE (mean)",
+                "RMSE (median)",
+                "RMSE (std)"
+            ]) + "\n"
+            with open(path, "a+") as sp:
+                sp.write(header)
+
+        # Last, write results.
+        line = ",".join([
+            f"{model}",
+            f"{str(seed)}",
+            f"{n}",
+            f"{rmse_avg:.4f}",
+            f"{rmse_median:.4f}",
+            f"{rmse_std:.4f}"
+        ])
+        with open(path, "a+") as rp:
+            rp.write(line)
 
 
 def run_benchmark(
@@ -1099,6 +1115,9 @@ def run_benchmark(
             wet=wet,
             window_size=window_size
         )
+
+    # Initialize bulk results/histories here, then pass with evals.
+    results: List[Dict[str, Dict[str, float]]] = []
     for idx, bundle in enumerate(data_bundles):
         # Extract mean/STD from training set for later use.
         training_config.train_mean = bundle.train_mean
@@ -1148,16 +1167,14 @@ def run_benchmark(
             f"test: {dataset_summary['test_samples']}, "
             f"feature_dim: {dataset_summary['feature_dim']}, "
             f"window_size: {dataset_summary['window_size']}, "
-            f"stride: {dataset_summary['stride']}"
+            f"stride: {dataset_summary['stride']}\n\n"
         )
-
-        # Initialize bulk results/histories here, then pass with evals.
-        results: List[Dict[str, Dict[str, float]]] = []
-        trial_results: Dict[str, Dict[str, float]] = {}
-        histories: Dict[str, TrainingHistory] = {}
 
         # Run each model through a round of the benchmark.
         for name, model in models.items():
+            trial_results: Dict[str, Dict[str, float]] = {}
+            histories: Dict[str, TrainingHistory] = {}
+
             trial_results, histories = run_benchmark_model(
                     data_bundle=bundle,
                     dataset_summary=dataset_summary,
@@ -1194,9 +1211,10 @@ def run_benchmark(
 
         # Add results here for final evaluation.
         results.append(trial_results)
+        print(results)
 
     # Analyze results here.
-    analyze_benchmark_results(results=results)
+    analyze_benchmark_results(output_dir=output_dir, results=results, seed=seed)
 
 
 def _report_results_summary(
