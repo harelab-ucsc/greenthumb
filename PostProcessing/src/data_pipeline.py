@@ -430,6 +430,7 @@ def _load_raw_b1_dataset(
         data_file_paths: list[str],
         num_trials: int = 10,
         num_steps: int = 8,
+        step_len: int = 1000,
         stride: int | None = None,
         target: str = "spr",
         wet: bool = True,
@@ -466,7 +467,7 @@ def _load_raw_b1_dataset(
         segments, segment_len = _segment_trial_by_steps(
                 df=df,
                 num_steps=num_steps,
-                step_len=window_size,
+                step_len=step_len,
                 trial_label=trial,
                 wet=wet
             )
@@ -543,6 +544,7 @@ def load_raw_dataset(
             data_file_paths=data_file_paths,
             num_trials=num_trials,
             num_steps=num_steps,
+            step_len=step_len,
             stride=stride,
             target=target,
             wet=wet,
@@ -582,13 +584,17 @@ def _compute_split_counts(
     _compute_split_counts(n_trials, train_frac, val_frac) -> (train, val, test)
 
     Computes integer trial counts per split with basic safeguards.
+    Set "val_frac" = 0 for leave-one-out cross validation.
     """
     if n_trials <= 2:
         raise ValueError(
                 "Need at least three trials to form train/val/test splits."
             )
-    train = max(1, int(round(n_trials * train_frac)))
-    val = max(1, int(round(n_trials * val_frac)))
+    val = int(round(n_trials * val_frac))
+    if val == 0:
+        train = n_trials - 1
+    else:
+        train = max(1, int(round(n_trials * train_frac)))
     if train + val >= n_trials:
         train = max(1, n_trials - 2)
         val = 1
@@ -606,11 +612,12 @@ def _assign_trial_splits(
         train_frac: float,
         val_frac: float,
         rng: np.random.Generator,
-    ) -> Dict[Tuple[int, int], str]:
+    ) -> Tuple[Dict[Tuple[int, int], str]]:
     """
     _assign_trial_splits(metadata, train_frac, val_frac, rng) -> assigned_splits
 
     Assigns each (compaction, wetness) tuple to a split (train, val, test).
+    Set "val_frac" = 0 to use leave-one-out-cross validation.
 
     """
     # TODO(nubby): Consider splitting up trials into subtrials to increase
@@ -618,7 +625,7 @@ def _assign_trial_splits(
     #               would also split up temporally linked datasets, which may
     #               be undesireable.
     # First group trials under compaction events and soil wetness events.
-    by_step = False     # Set to True to make splits by number of steps.
+    by_step = True      # Set to True to make splits by number of steps.
     by_scene = False    # Set to True to group datasets from the same scene.
     by_key: Dict[Tuple[int, int], List[int]] = {}
     for meta in metadata:
@@ -628,8 +635,9 @@ def _assign_trial_splits(
         if meta.trial not in by_key[key]:
             by_key[key].append(meta.trial)
 
-    # Intelligently divide trials by number of steps in each scenario.
+    # Intelligently divide trials by number of steps in each scenario?
     division: Dict[Tuple[int, int], int] = {}
+    n_scenes = len(by_key.keys())
     for key in by_key.keys():
         # Get the number of total entries for each key.
         n = len([
@@ -645,48 +653,65 @@ def _assign_trial_splits(
     train_steps = np.ceil(total_steps * train_frac)
     val_steps = np.floor(total_steps * val_frac)
     """
-    # Assign trials from each compaction/wetness level randomly to splits.
-    assignment: Dict[Tuple[int, int, str], str] = {}
-    if not by_scene:
-        for key, trials in by_key.items():
-            # Randomly shuffle trials for each key value, then split accordingly.
-            trials_copy = list(trials)
-            rng.shuffle(trials_copy)
-            train_count, val_count, _ = _compute_split_counts(
-                    len(trials_copy), train_frac, val_frac
-                )
-            train_trials = set(trials_copy[:train_count])
-            val_trials = set(trials_copy[train_count : train_count + val_count])
-            for trial in trials:
-                if trial in train_trials:
-                    assignment[(key[0], key[1], trial)] = "train"
-                elif trial in val_trials:
-                    assignment[(key[0], key[1], trial)] = "val"
-                else:
-                    assignment[(key[0], key[1], trial)] = "test"
+    if val_frac == 0:
+        assignments = []
+        assignment: Dict[Tuple[int, int, str], str] = {}
+        # For LOOCV, train and evaluate on every possible scene config.
+        for idx in range(n_scenes):
+            keys = list(by_key.keys())
+            test_key = keys[idx]
+            test_trials = by_key[test_key]
+            for trial in test_trials:
+                assignment[(test_key[0], test_key[1], trial)] = "test"
+            for key, trials in by_key.items():
+                if key != test_key:
+                    for trial in trials:
+                        assignment[(key[0], key[1], trial)] = "train"
+            # Add this assignment.
+            assignments.append(assignment)
+        return assignments
     else:
-        # If grouping by scenario (indexed by (SWC, compaction index)), assign
-        # by key rather than by trial.
-        keys = list(by_key.keys())
-        # Randomly shuffle keys (each "scenario"), then split accordingly.
-        rng.shuffle(keys)
-        train_count, val_count, _ = _compute_split_counts(
-                len(keys), train_frac, val_frac
-            )
-        train_keys = set(keys[:train_count])
-        val_keys = set(keys[train_count : train_count + val_count])
-        for key, trials in by_key.items():
-            if key in train_keys:
+        # Assign trials from each compaction/wetness level randomly to splits.
+        assignment: Dict[Tuple[int, int, str], str] = {}
+        if not by_scene:
+            for key, trials in by_key.items():
+                # Randomly shuffle trials for each key value, then split accordingly.
+                trials_copy = list(trials)
+                rng.shuffle(trials_copy)
+                train_count, val_count, _ = _compute_split_counts(
+                        len(trials_copy), train_frac, val_frac
+                    )
+                train_trials = set(trials_copy[:train_count])
+                val_trials = set(trials_copy[train_count : train_count + val_count])
                 for trial in trials:
-                    assignment[(key[0], key[1], trial)] = "train"
-            elif key in val_keys:
-                for trial in trials:
-                    assignment[(key[0], key[1], trial)] = "val"
-            else:
-                for trial in trials:
-                    assignment[(key[0], key[1], trial)] = "test"
-
-    return assignment
+                    if trial in train_trials:
+                        assignment[(key[0], key[1], trial)] = "train"
+                    elif trial in val_trials:
+                        assignment[(key[0], key[1], trial)] = "val"
+                    else:
+                        assignment[(key[0], key[1], trial)] = "test"
+        else:
+            # If grouping by scenario (indexed by (SWC, compaction index)), assign
+            # by key rather than by trial.
+            keys = list(by_key.keys())
+            # Randomly shuffle keys (each "scenario"), then split accordingly.
+            rng.shuffle(keys)
+            train_count, val_count, _ = _compute_split_counts(
+                    len(keys), train_frac, val_frac
+                )
+            train_keys = set(keys[:train_count])
+            val_keys = set(keys[train_count : train_count + val_count])
+            for key, trials in by_key.items():
+                if key in train_keys:
+                    for trial in trials:
+                        assignment[(key[0], key[1], trial)] = "train"
+                elif key in val_keys:
+                    for trial in trials:
+                        assignment[(key[0], key[1], trial)] = "val"
+                else:
+                    for trial in trials:
+                        assignment[(key[0], key[1], trial)] = "test"
+        return [assignment]
 
 def _compute_feature_stats(
         sequences: Sequence[np.ndarray],
@@ -722,7 +747,7 @@ def _compute_label_stats(
         std = 1.0
     return mean.astype(np.float32), std.astype(np.float32)
 
-def build_data_bundle(
+def build_data_bundles(
         data_dir: str,
         num_steps: int,
         seed: int = 13,
@@ -763,82 +788,93 @@ def build_data_bundle(
 
     # Randomly-split trials into (train, val, test) splits based on trial
     # labels.
-    assignment = _assign_trial_splits(
+    assignments = _assign_trial_splits(
         metadata=raw.metadata,
         train_frac=train_frac,
         val_frac=val_frac,
         rng=rng
     )
 
+    bundles = []
     # Lightweight reference structure using integer indices rather than unique
     # metadata entries.
-    split_indices: Dict[str, List[int]] = {"train": [], "val": [], "test": []}
-    for idx, meta in enumerate(raw.metadata):
-        split = assignment[(meta.idx_compaction, meta.idx_wetness, meta.trial)]
-        split_indices[split].append(idx)
+    for assignment in assignments:
+        split_indices: Dict[str, List[int]] = {
+                "train": [], "val": [], "test": []
+            }
+        for idx, meta in enumerate(raw.metadata):
+            split = assignment[
+                    (meta.idx_compaction, meta.idx_wetness, meta.trial)
+                ]
+            split_indices[split].append(idx)
 
-    # Generate stats from training dataset for use in normalization.
-    feature_mean_np, feature_std_np = _compute_feature_stats(
-        raw.sequences,
-        split_indices["train"]
-    )
-    labels_mean, labels_std = _compute_label_stats(
-        labels=raw.labels,
-        indices=split_indices["train"]
-    )
-
-    def make_dataset(indices: List[int]) -> SequenceDataset:
-        """
-        make_dataset(indices) -> SequenceDataset
-
-        Shape formatted sequences into tensors for ingestion into torch by
-        assigned split indices.
-        """
-        seq_tensors: List[torch.Tensor] = []
-        lengths_tensors: List[torch.Tensor] = []
-        labels_tensors: List[torch.Tensor] = []
-        metadata_subset: List[SampleMetadata] = []
-
-        for idx in indices:
-            seq = raw.sequences[idx]
-            label = raw.labels[idx]
-            # First normalize each sequence based on the training dataset stats.
-            # TODO(nubby): Is this just the z-score?
-            norm_seq = (seq - feature_mean_np) / feature_std_np
-            seq_tensors.append(torch.from_numpy(norm_seq.astype(np.float32)))
-            lengths_tensors.append(
-                torch.tensor(raw.lengths[idx], dtype=torch.long)
-            )
-            # Next normalize labels here.
-            norm_label = (label - labels_mean) / labels_std
-            labels_tensors.append(
-                torch.tensor(norm_label, dtype=torch.float)
-            )
-            metadata_subset.append(raw.metadata[idx])
-
-        return SequenceDataset(
-            sequences=seq_tensors,
-            labels=torch.stack(labels_tensors),
-            lengths=torch.stack(lengths_tensors),
-            metadata=metadata_subset
+        # Generate stats from training dataset for use in normalization.
+        feature_mean_np, feature_std_np = _compute_feature_stats(
+            raw.sequences,
+            split_indices["train"]
+        )
+        labels_mean, labels_std = _compute_label_stats(
+            labels=raw.labels,
+            indices=split_indices["train"]
         )
 
-    # Convert splits into SequenceDataset for ingestion by torch.
-    train_ds = make_dataset(split_indices["train"])
-    val_ds = make_dataset(split_indices["val"])
-    test_ds = make_dataset(split_indices["test"])
+        def make_dataset(indices: List[int]) -> SequenceDataset:
+            """
+            make_dataset(indices) -> SequenceDataset
 
-    # Generate dataset-scale statistics.
-    feature_mean = torch.from_numpy(feature_mean_np)
-    feature_std = torch.from_numpy(feature_std_np)
+            Shape formatted sequences into tensors for ingestion into torch by
+            assigned split indices.
+            """
+            # Return "None" for validation set if using leave-one-out.
+            if len(indices) == 0:
+                return None
+            seq_tensors: List[torch.Tensor] = []
+            lengths_tensors: List[torch.Tensor] = []
+            labels_tensors: List[torch.Tensor] = []
+            metadata_subset: List[SampleMetadata] = []
 
-    return FullDataBundle(
-        train=train_ds,
-        val=val_ds,
-        test=test_ds,
-        feature_mean=feature_mean,
-        feature_std=feature_std,
-        feature_names=raw.feature_names,
-        train_mean=labels_mean,
-        train_std=labels_std,
-    ), assignment
+            for idx in indices:
+                seq = raw.sequences[idx]
+                label = raw.labels[idx]
+                # First normalize each sequence based on the training dataset stats.
+                # TODO(nubby): Is this just the z-score?
+                norm_seq = (seq - feature_mean_np) / feature_std_np
+                seq_tensors.append(torch.from_numpy(norm_seq.astype(np.float32)))
+                lengths_tensors.append(
+                    torch.tensor(raw.lengths[idx], dtype=torch.long)
+                )
+                # Next normalize labels here.
+                norm_label = (label - labels_mean) / labels_std
+                labels_tensors.append(
+                    torch.tensor(norm_label, dtype=torch.float)
+                )
+                metadata_subset.append(raw.metadata[idx])
+
+            return SequenceDataset(
+                sequences=seq_tensors,
+                labels=torch.stack(labels_tensors),
+                lengths=torch.stack(lengths_tensors),
+                metadata=metadata_subset
+            )
+
+        # Convert splits into SequenceDataset for ingestion by torch.
+        train_ds = make_dataset(split_indices["train"])
+        val_ds = make_dataset(split_indices["val"])
+        test_ds = make_dataset(split_indices["test"])
+
+        # Generate dataset-scale statistics.
+        feature_mean = torch.from_numpy(feature_mean_np)
+        feature_std = torch.from_numpy(feature_std_np)
+
+        bundles.append(FullDataBundle(
+                train=train_ds,
+                val=val_ds,
+                test=test_ds,
+                feature_mean=feature_mean,
+                feature_std=feature_std,
+                feature_names=raw.feature_names,
+                train_mean=labels_mean,
+                train_std=labels_std,
+            ))
+
+    return bundles, assignments

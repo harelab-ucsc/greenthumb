@@ -32,11 +32,11 @@ import matplotlib.pyplot as plt
 
 import wandb
 
-from data_pipeline import build_data_bundle, FullDataBundle
+from data_pipeline import build_data_bundles, FullDataBundle
 from models import LSTMEstimator, TemporalConvNetEstimator, TransformerEstimator
 
 # Library configs.
-matplotlib.use("Agg")
+#matplotlib.use("Agg")
 logger = logging.getLogger("greenthumb")
 
 
@@ -88,6 +88,7 @@ class TrainingConfig:
     classic_mode: bool = False
     epochs: int = 30
     grad_clip: float = 1.0
+    loocv: bool = False
     lr: float = 3e-4
     patience: int = 30
     train_mean: float = 0.0
@@ -162,12 +163,13 @@ def set_up(
 
 def save_trial_splits(
         assignment: Dict,
+        idx: int,
         output_dir: Path,
         seed: int,
         training_config: TrainingConfig
     ):
     """
-    save_trial_splits(data_bundle, output_dir, training_config)
+    save_trial_splits(data_bundle, idx, output_dir, training_config)
 
     Save splits from a given seed.
     """
@@ -178,7 +180,7 @@ def save_trial_splits(
     # Extract information to create a full path.
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%d_%H%M%S")
-    path = splits_dir / ("-".join([ts, str(seed), "splits"]) + ".csv")
+    path = splits_dir / ("-".join([ts, str(seed), "splits", str(idx)]) + ".csv")
 
     # Next, add a header line.
     header = ",".join([
@@ -333,6 +335,7 @@ def train_and_evaluate(
         model: nn.Module,
         data_bundle: FullDataBundle,
         device: torch.device,
+        loocv: bool,
         training_config: TrainingConfig,
         *,
         model_name: str,
@@ -352,10 +355,13 @@ def train_and_evaluate(
             batch_size=training_config.batch_size,
             split="train",
         )
-    val_loader = data_bundle.dataloader(
-            batch_size=training_config.batch_size,
-            split="val",
-        )
+    if not loocv:
+        val_loader = data_bundle.dataloader(
+                batch_size=training_config.batch_size,
+                split="val",
+            )
+    else:
+        val_loader = None
     test_loader = data_bundle.dataloader(
             batch_size=training_config.batch_size,
             split="test",
@@ -425,62 +431,96 @@ def train_and_evaluate(
             )
         
         # Validate model.
-        val_stats, _ = run_epoch(
-            model,
-            val_loader,
-            criterion,
-            device,
-            target=target,
-            train_mean=training_config.train_mean,
-            train_std=training_config.train_std,
-            train=False,
-            split="val",
-        )
-        # Unzip validation test stats.
-        val_loss, val_acc, val_rmse, val_perc_e_mean, val_perc_e_std = (
-                val_stats.loss_mean,
-                val_stats.accuracy_mean,
-                val_stats.rmse,
-                val_stats.percent_e_mean,
-                val_stats.percent_e_std
+        if not loocv:
+            val_stats, _ = run_epoch(
+                model,
+                val_loader,
+                criterion,
+                device,
+                target=target,
+                train_mean=training_config.train_mean,
+                train_std=training_config.train_std,
+                train=False,
+                split="val",
             )
-        # TODO(nubby)
-        scheduler.step(val_acc)
+            # Unzip validation test stats.
+            val_loss, val_acc, val_rmse, val_perc_e_mean, val_perc_e_std = (
+                    val_stats.loss_mean,
+                    val_stats.accuracy_mean,
+                    val_stats.rmse,
+                    val_stats.percent_e_mean,
+                    val_stats.percent_e_std
+                )
+            # TODO(nubby)
+            scheduler.step(val_acc)
 
         # Evaluate model performance outside of loss.
         # TODO(nubby):  Chat with some friends about minimizing loss versus
         #               these weird evaluations.
-        if (val_perc_e_mean < best_val_percent_error):
-            # Evaluation for SPR (drop "mean" for ease of use).
-            best_val_percent_error = val_perc_e_mean
-            if not training_config.classic_mode:
-                if (target == "spr"):
+        if not loocv:
+            if (val_perc_e_mean < best_val_percent_error):
+                # Evaluation for SPR (drop "mean" for ease of use).
+                best_val_percent_error = val_perc_e_mean
+                if not training_config.classic_mode:
+                    if (target == "spr"):
+                        best_state = copy.deepcopy(model.state_dict())
+                        best_epoch = epoch
+                        epochs_no_improve = 0
+                    else:
+                        epochs_no_improve += 1
+
+            if (val_rmse < best_val_rmse):
+                # Evaluation for SBD.
+                best_val_rmse = val_rmse
+                if not training_config.classic_mode:
+                    if (target == "sbd"):
+                        best_state = copy.deepcopy(model.state_dict())
+                        best_epoch = epoch
+                        epochs_no_improve = 0
+                    else:
+                        epochs_no_improve += 1
+
+            if (val_acc > best_val_acc):
+                # Evaluation for classic mode.
+                best_val_acc = val_acc
+                if training_config.classic_mode:
                     best_state = copy.deepcopy(model.state_dict())
                     best_epoch = epoch
                     epochs_no_improve = 0
                 else:
                     epochs_no_improve += 1
+        else:
+            if (train_perc_e_mean < best_val_percent_error):
+                # Evaluation for SPR (drop "mean" for ease of use).
+                best_val_percent_error = train_perc_e_mean
+                if not training_config.classic_mode:
+                    if (target == "spr"):
+                        best_state = copy.deepcopy(model.state_dict())
+                        best_epoch = epoch
+                        epochs_no_improve = 0
+                    else:
+                        epochs_no_improve += 1
 
-        if (val_rmse < best_val_rmse):
-            # Evaluation for SBD.
-            best_val_rmse = val_rmse
-            if not training_config.classic_mode:
-                if (target == "sbd"):
+            if (train_rmse < best_val_rmse):
+                # Evaluation for SBD.
+                best_val_rmse = train_rmse
+                if not training_config.classic_mode:
+                    if (target == "sbd"):
+                        best_state = copy.deepcopy(model.state_dict())
+                        best_epoch = epoch
+                        epochs_no_improve = 0
+                    else:
+                        epochs_no_improve += 1
+
+            if (train_acc > best_val_acc):
+                # Evaluation for classic mode.
+                best_val_acc = train_acc
+                if training_config.classic_mode:
                     best_state = copy.deepcopy(model.state_dict())
                     best_epoch = epoch
                     epochs_no_improve = 0
                 else:
                     epochs_no_improve += 1
-
-        if (val_acc > best_val_acc):
-            # Evaluation for classic mode.
-            best_val_acc = val_acc
-            if training_config.classic_mode:
-                best_state = copy.deepcopy(model.state_dict())
-                best_epoch = epoch
-                epochs_no_improve = 0
-            else:
-                epochs_no_improve += 1
         """
         if (val_acc > best_val_acc):
             best_val_acc = val_acc
@@ -494,8 +534,18 @@ def train_and_evaluate(
         history.epoch_indices.append(epoch)
         history.train_epoch_loss.append(train_loss)
         history.train_epoch_acc.append(train_acc)
-        history.val_epoch_loss.append(val_loss)
-        history.val_epoch_acc.append(val_acc)
+        if not loocv:
+            history.val_epoch_loss.append(val_loss)
+            history.val_epoch_acc.append(val_acc)
+        else:
+            history.val_epoch_loss.append(train_loss)
+            history.val_epoch_acc.append(train_acc)
+            # For logging.
+            val_loss = train_loss
+            val_acc = train_acc
+            val_rmse = train_rmse
+            val_perc_e_mean = train_perc_e_mean
+            val_perc_e_std = train_perc_e_std
         history.learning_rates.append(optimizer.param_groups[0]["lr"])
 
         logger.info(
@@ -729,6 +779,7 @@ def _print_model_results(model_results: Dict[str, float], name: str, seed: int):
 
 
 def _save_model_results(
+        idx: int,
         model_results: Dict[str, float],
         name: str,
         output_dir: Path,
@@ -742,7 +793,7 @@ def _save_model_results(
     logger.info(
             f"Saving results for {name} (seed={seed}) to {output_dir}."
         )
-    path = output_dir / "results.csv"
+    path = output_dir / "model_results.csv"
     now = datetime.now(timezone.utc)
 
     # If the results file and/or directory do not yet exist, add/create them.
@@ -754,6 +805,7 @@ def _save_model_results(
                 "Timestamp",
                 "ModelName",
                 "Seed",
+                "TrainingIndex",
                 "BestValidationAccuracy",
                 "TestAccuracy",
                 "TestLoss",
@@ -782,6 +834,7 @@ def _save_model_results(
         ts,
         name,
         str(seed),
+        str(idx),
         training_config.target,
         classic,
         str(training_config.batch_size),
@@ -797,6 +850,7 @@ def _save_model_results(
             ts,
             name,
             str(seed),
+            str(idx),
             str(model_results["best_val_acc"]),
             str(model_results["test_acc"]),
             str(model_results["test_loss"]),
@@ -822,6 +876,7 @@ def _save_model_results(
 
 def _report_model_results(
         debug_mode: bool,
+        idx: int,
         model_history: TrainingHistory,
         model_results: Dict[str, float],
         name: str,
@@ -837,6 +892,7 @@ def _report_model_results(
     _print_model_results(model_results=model_results, name=name, seed=seed)
     if not debug_mode:
         label = _save_model_results(
+                idx=idx,
                 model_results=model_results,
                 output_dir=output_dir,
                 name=name,
@@ -863,6 +919,8 @@ def run_benchmark_model(
         debug_mode: bool,
         device: torch.device,
         histories: Dict[str, TrainingHistory],
+        idx: int,
+        loocv: bool,
         model: nn.Module,
         name: str,
         output_dir: Path,
@@ -902,6 +960,7 @@ def run_benchmark_model(
             model=model,
             data_bundle=data_bundle,
             device=device,
+            loocv=loocv,
             model_name=name,
             training_config=training_config,
             target=training_config.target,
@@ -913,6 +972,7 @@ def run_benchmark_model(
     histories[name] = history
     _report_model_results(
             debug_mode=debug_mode,
+            idx=idx,
             model_history=history,
             model_results=outcomes,
             name=name,
@@ -927,13 +987,15 @@ def run_benchmark_model(
     return results, histories
 
 def _print_benchmark_results(
+        idx: int,
+        n: int,
         results: Dict[str, Dict[str, float]],
         seed: int
     ):
     """
     _print_benchmark_results(results, seed)
     """
-    logger.info(f"\n=== Summary (seed: {seed}) ===")
+    logger.info(f"\n=== Summary (seed: {seed}, fold {idx}/{n}) ===")
     for name, metrics in results.items():
         logger.info(
             f"{name.upper():12s} | val_acc={metrics['best_val_acc']:.3f} "
@@ -944,9 +1006,55 @@ def _print_benchmark_results(
             f"| test_perc_e_std={metrics['test_perc_e_std']:.3f}"
         )
 
+def analyze_benchmark_results(
+        output_dir: Path,
+        results: List[Dict[str, Dict[str, float]]],
+        seed: int
+    ):
+    n = len(results)
+    rmses = [trial["test_rmse"] for _, trial in results.items()]
+    rmse_avg = np.mean(rmses)
+    rmse_median = np.median(rmses)
+    rmse_std = np.std(rmses)
+    logger.info(
+        f"{str(seed)} | "
+        f"| n={n} "
+        f"| rmse_avg={rmse_avg:.4f} "
+        f"| rmse_median={rmse_median:.4f} "
+        f"| rmse_std={rmse_std:.4f} "
+    )
+
+    # Save output.
+    path = output_dir / "results.csv"
+
+    # Next, add a header line.
+    if not path.exists():
+        header = ",".join([
+            "Seed",
+            "N",
+            "RMSE (mean)",
+            "RMSE (median)",
+            "RMSE (std)"
+        ]) + "\n"
+        with open(path, "a+") as sp:
+            sp.write(header)
+
+    # Last, write results.
+    line = ",".join([
+        f"{str(seed)}",
+        f"{n}",
+        f"{rmse_avg:.4f}",
+        f"{rmse_median:.4f}",
+        f"{rmse_std:.4f}"
+    ])
+    with open(path, "a+") as rp:
+        rp.write(line)
+
+
 def run_benchmark(
         data_dir: str,
         debug_mode: bool,
+        loocv: bool,
         models: list[str],
         num_steps: int,
         output_dir: Path,
@@ -974,102 +1082,122 @@ def run_benchmark(
     # different random seed for thoroughness).
     # TODO(nubby):  Further divide individual trials, either by a fixed size or
     #               by steps.
-    data_bundle, split_assignment = build_data_bundle(
+    if loocv:
+        val_frac = 0.0
+        n_scenes = 1000 # Update with trial bundling.
+    else:
+        val_frac = 0.2
+        n_scenes = 1
+
+    data_bundles, split_assignments = build_data_bundles(
             data_dir=data_dir,
             num_steps=num_steps,
             seed=seed,
             stride=stride,
             target=target,
+            val_frac=val_frac,
             wet=wet,
             window_size=window_size
         )
-    # Extract mean/STD from training set for later use.
-    training_config.train_mean = data_bundle.train_mean
-    training_config.train_std = data_bundle.train_std
+    for idx, bundle in enumerate(data_bundles):
+        # Extract mean/STD from training set for later use.
+        training_config.train_mean = bundle.train_mean
+        training_config.train_std = bundle.train_std
 
-    input_dim = len(data_bundle.feature_names)
+        input_dim = len(bundle.feature_names)
 
-    # Save trial splits.
-    save_trial_splits(
-            assignment=split_assignment,
-            output_dir=output_dir,
-            seed=seed,
-            training_config=training_config
-        )
+        # Number of soil layers to predict (from the top layer down).
+        soil_layers = 1
 
-    # Number of soil layers to predict (from the top layer down).
-    soil_layers = 1
-
-    # Set up models.
-    available_models = {
-        "lstm": LSTMEstimator(input_dim=input_dim, num_targets=soil_layers),
-        "tcn": TemporalConvNetEstimator(
-            input_dim=input_dim,
-            num_targets=soil_layers
-        ),
-        "transformer": TransformerEstimator(
-            input_dim=input_dim,
-            num_targets=soil_layers,
-            max_chunk_len=window_size
-        )
-    }
-
-    # Verify model selection is valid, then load them.
-    unknown = set(models) - set(available_models.keys())
-    if unknown:
-        raise ValueError(
-            f"Unknown model names requested: {', '.join(sorted(unknown))}"
-        )
-    models = {name: available_models[name] for name in models}
-
-    # Summarize dataset.
-    dataset_summary = {
-        "train_samples": len(data_bundle.train),
-        "val_samples": len(data_bundle.val),
-        "test_samples": len(data_bundle.test),
-        "feature_dim": input_dim,
-        "window_size": window_size,
-        "stride": stride,
-    }
-
-    logger.info(
-        "Dataset sequences -> "
-        f"train: {dataset_summary['train_samples']}, "
-        f"val: {dataset_summary['val_samples']}, "
-        f"test: {dataset_summary['test_samples']}, "
-        f"feature_dim: {dataset_summary['feature_dim']}, "
-        f"window_size: {dataset_summary['window_size']}, "
-        f"stride: {dataset_summary['stride']}"
-    )
-
-    # Initialize bulk results/histories here, then pass with evals.
-    results: Dict[str, Dict[str, float]] = {}
-    histories: Dict[str, TrainingHistory] = {}
-
-    # Run each model through a round of the benchmark.
-    for name, model in models.items():
-        #try:
-        results, histories = run_benchmark_model(
-                data_bundle=data_bundle,
-                dataset_summary=dataset_summary,
-                debug_mode=debug_mode,
-                device=device,
-                histories=histories,
-                model=model,
-                name=name,
-                output_dir=output_dir,
-                results=results,
-                seed=seed,
-                training_config=training_config,
-                wandb_config=wandb_config
+        # Set up models.
+        available_models = {
+            "lstm": LSTMEstimator(input_dim=input_dim, num_targets=soil_layers),
+            "tcn": TemporalConvNetEstimator(
+                input_dim=input_dim,
+                num_targets=soil_layers
+            ),
+            "transformer": TransformerEstimator(
+                input_dim=input_dim,
+                num_targets=soil_layers,
+                max_chunk_len=window_size
             )
-        #finally:
+        }
 
-    # Report benchmark results for each seed.
-    _print_benchmark_results(
-            results=results,
-            seed=seed
+        # Verify model selection is valid, then load them.
+        unknown = set(models) - set(available_models.keys())
+        if unknown:
+            raise ValueError(
+                f"Unknown model names requested: {', '.join(sorted(unknown))}"
+            )
+        models = {name: available_models[name] for name in models}
+
+        # Summarize dataset.
+        dataset_summary = {
+            "train_samples": len(bundle.train),
+            "val_samples": len(bundle.val) if not loocv else 0,
+            "test_samples": len(bundle.test),
+            "feature_dim": input_dim,
+            "window_size": window_size,
+            "stride": stride,
+        }
+
+        logger.info(
+            "Dataset sequences -> "
+            f"train: {dataset_summary['train_samples']}, "
+            f"val: {dataset_summary['val_samples']}, "
+            f"test: {dataset_summary['test_samples']}, "
+            f"feature_dim: {dataset_summary['feature_dim']}, "
+            f"window_size: {dataset_summary['window_size']}, "
+            f"stride: {dataset_summary['stride']}"
         )
+
+        # Initialize bulk results/histories here, then pass with evals.
+        results: List[Dict[str, Dict[str, float]]] = []
+        trial_results: Dict[str, Dict[str, float]] = {}
+        histories: Dict[str, TrainingHistory] = {}
+
+        # Run each model through a round of the benchmark.
+        for name, model in models.items():
+            trial_results, histories = run_benchmark_model(
+                    data_bundle=bundle,
+                    dataset_summary=dataset_summary,
+                    debug_mode=debug_mode,
+                    device=device,
+                    histories=histories,
+                    idx=idx,
+                    loocv=loocv,
+                    model=model,
+                    name=name,
+                    output_dir=output_dir,
+                    results=trial_results,
+                    seed=seed,
+                    training_config=training_config,
+                    wandb_config=wandb_config
+                )
+        # Save trial splits.
+        save_trial_splits(
+                assignment=split_assignments[idx],
+                idx=idx,
+                output_dir=output_dir,
+                seed=seed,
+                training_config=training_config
+            )
+
+
+        # Report benchmark results for each seed.
+        _print_benchmark_results(
+                idx=idx+1,
+                n=len(data_bundles),
+                results=trial_results,
+                seed=seed
+            )
+
+        # Add results here for final evaluation.
+        results.append(trial_results)
+
+    # Analyze results here.
+    analyze_benchmark_results(results=results)
+
 
 def _report_results_summary(
         output_dir: Path
@@ -1088,6 +1216,7 @@ def benchmark(
         data_dir: str,
         debug_mode: bool,
         epochs: int,
+        loocv: bool,
         lr: float,
         models: list[str],
         n_evals: int,
@@ -1128,6 +1257,7 @@ def benchmark(
             batch_size=batch_size,
             classic_mode=classic_mode,
             epochs=epochs,
+            loocv=loocv,
             lr=lr,
             no_cuda=no_cuda,
             num_steps=num_steps,
@@ -1141,6 +1271,7 @@ def benchmark(
         run_benchmark(
             data_dir=data_dir,
             debug_mode=debug_mode,
+            loocv=loocv,
             models=models,
             num_steps=num_steps,
             output_dir=output_dir,
@@ -1315,6 +1446,12 @@ if __name__ == "__main__":
             default=True,
             help=("Use VWC as a feature in training.")
         )
+    parser.add_argument(
+            "--loocv",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help=("Use leave-one-out cross validation.")
+        )
     args = parser.parse_args()
 
     if args.stride is not None and args.window_size is None:
@@ -1335,6 +1472,7 @@ if __name__ == "__main__":
             data_dir=args.data_dir,
             debug_mode=args.debug,
             epochs=args.epochs,
+            loocv=args.loocv,
             lr=args.lr,
             models=args.models,
             n_evals=args.n,

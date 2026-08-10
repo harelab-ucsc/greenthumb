@@ -153,27 +153,32 @@ def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
     cols = ["Timestamp (Epoch-UTC-ms)"]
     cols += lut_leg[leg.lower()]
 
-    # Filter by finding the min angle (retracted leg == most negative) with
-    # dQ and d2Q; we are actually capturing the "leg bending" event rather than
-    # "contact" event here.
+    THRESHOLD_VELOCITY = 1.0
+
+    # Filter by finding the max local angle (retracted == most negative) with
+    # dQ and d2Q; we are capturing right before the "contact" event where
+    # EAOT velocity is the greatest.
     df_filtered = df[cols]
     ts_filtered = df_filtered.loc[
-            (df_filtered[lut_leg[leg][1]].abs() < _EPSILON) &
-            (df_filtered[lut_leg[leg][2]] > 0)
+            (df_filtered[lut_leg[leg][1]] > THRESHOLD_VELOCITY) &
+            (df_filtered[lut_leg[leg][2]].abs() < _EPSILON)
         ]
     leg_ts = ts_filtered["Timestamp (Epoch-UTC-ms)"].astype("int64").values
     leg_angles = ts_filtered[lut_leg[leg][0]].values
+    dqs = ts_filtered[lut_leg[leg][1]].values
 
     # Only return timestamps of step events that are sufficiently separated.
     idx = 0
     delta = 0
-    step_ts = []
+    step_ts = []    # Skip the first step in case it is not a true step.
     step_angles = []
+    step_dqs = []
     while (idx < len(ts_filtered) - 1):
         delta = leg_ts[idx+1] - leg_ts[idx]
         if (delta > _THRESHOLD_TS_MS_STEP):
             step_ts.append(leg_ts[idx])
             step_angles.append(leg_angles[idx])
+            step_dqs.append(dqs[idx])
         idx += 1
 
     return step_ts
@@ -247,8 +252,8 @@ def get_steps_from_step_events(
         for idx_step, event in enumerate(events):
             # Find the start/end timestamps for each event (small overlaps
             # okay).
-            ts_start = event - (_THRESHOLD_TS_MS_STEP * 2)
-            ts_end = event + (_THRESHOLD_TS_MS_STEP * 2)
+            ts_start = event - (step_len / 2)
+            ts_end = event + (step_len / 2)
 
             # Filter each event's DF appropriately (to exactly 1000 values).
             event_df = df.loc[(df["Timestamp (Epoch-UTC-ms)"] >= ts_start) &
@@ -274,6 +279,26 @@ def get_steps_from_step_events(
 
     return steps
             
+def trim_steps(steps: list[B1Step]) -> list[B1Step]:
+    """
+    trim_steps(steps) -> steps
+    """
+    # Sort all steps by start time.
+    steps_sorted = sorted(steps, key=lambda s: s.ts_start)
+
+    # Now only return steps whose start time does not overlap with another step
+    #   (by some threshold).
+    SEPARATION_STEP = 200   # Min time (ms) between end of one step and start of
+                            # another.
+    # Add the first step.
+    steps_out = [steps_sorted[0]]
+    ts_min = steps_sorted[0].ts_end
+    for step in steps_sorted[1:]:
+        if (step.ts_start - ts_min) * 1000 > SEPARATION_STEP:
+            ts_min = step.ts_end    # Update min required start time.
+            steps_out.append(step)  # Add to valid steps.
+
+    return steps_out
 
 def get_steps_from_b1_df(
         df: pd.DataFrame,
@@ -322,6 +347,13 @@ def get_steps_from_b1_df(
         trial_label=trial_label
     )
     logging.info(f"Detected {len(steps)} steps in {trial_label}.")
+
+    # NOTE: Uncomment the below if steps must be fully isolated.
+    """
+    # Only include steps that are fully temporally-separated.
+    steps = trim_steps(steps=steps)
+    logging.info(f"Filtered to {len(steps)} separate steps in {trial_label}.")
+    """
 
     # Plot a sample of steps if desired.
     n_steps = 3
