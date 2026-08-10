@@ -1061,7 +1061,7 @@ def analyze_benchmark_results(
             f"{n}",
             f"{rmse_avg:.4f}",
             f"{rmse_median:.4f}",
-            f"{rmse_std:.4f}"
+            f"{rmse_std:.4f}" + "\n"
         ])
         with open(path, "a+") as rp:
             rp.write(line)
@@ -1211,7 +1211,6 @@ def run_benchmark(
 
         # Add results here for final evaluation.
         results.append(trial_results)
-        print(results)
 
     # Analyze results here.
     analyze_benchmark_results(output_dir=output_dir, results=results, seed=seed)
