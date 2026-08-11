@@ -44,7 +44,7 @@ def split_alt_and_classic_runs(
 
     return data_alt, data_classic
 
-def post_process_results(path_results: str):
+def legacy_post_process_results(path_results: str):
     """
     post_process_results(path_results)
     """
@@ -168,6 +168,60 @@ def post_process_results(path_results: str):
         except IndexError:
             # IndexError occurs when only one target has thus been run.
             continue
+
+def post_process_results(path_results: str):
+    """
+    post_process_results(path_results)
+    """
+    # First load all results into a dict.
+    df = _load_csv(path=path_results)
+
+    # Then further filter each by model result.
+    n = len(df.index)
+    logging.info(f"Found {n} runs:\n")
+
+    # Get stats.
+    df_lstm = df.loc[(df["ModelName"] == "lstm")]
+    df_tcn = df.loc[(df["ModelName"] == "tcn")]
+    df_trans = df.loc[(df["ModelName"] == "transformer")]
+    
+    # Get useful info.
+    try:
+        rmse_lstm_max = df_lstm["RMSE (mean)"].max()
+        rmse_lstm_max_seed = df_lstm.loc[
+                df_lstm["RMSE (mean)"] == rmse_lstm_max, "Seed"].iloc[0]
+        rmse_tcn_max = df_tcn["RMSE (mean)"].max()
+        rmse_tcn_max_seed = df_tcn.loc[
+                df_tcn["RMSE (mean)"] == rmse_tcn_max, "Seed"].iloc[0]
+        rmse_trans_max = df_trans["RMSE (mean)"].max()
+        rmse_trans_max_seed = df_trans.loc[
+                df_trans["RMSE (mean)"] == rmse_trans_max, "Seed"].iloc[0]
+        # Print it.
+        logging.info(
+                f"RESULTS FROM {path_results} (TARGET=SBD):\n"
+                f"\tALL: Number of runs:\t\t{n}\n"
+                "\n"
+                f"\tLSTM:\tNumber of runs:\t\t{len(df_lstm.index)}\n"
+                f"\tLSTM:\tAvg test RMSE:\t\t{df_lstm['RMSE (mean)'].mean()}\n"
+                f"\tLSTM:\tAvg test RMSE STD:\t\t{df_lstm['RMSE (std)'].mean()}\n"
+                f"\tLSTM:\tSTD test RMSE:\t\t{df_lstm['RMSE (mean)'].std()}\n"
+                f"\tLSTM:\tBest test RMSE:\t\t{rmse_lstm_max} (seed={rmse_lstm_max_seed})\n"
+                "\n"
+                f"\tTCN:\tNumber of runs:\t\t{len(df_tcn.index)}\n"
+                f"\tTCN:\tAvg test RMSE:\t\t{df_tcn['RMSE (mean)'].mean()}\n"
+                f"\tTCN:\tAvg test RMSE STD:\t\t{df_tcn['RMSE (std)'].mean()}\n"
+                f"\tTCN:\tSTD test RMSE:\t\t{df_tcn['RMSE (mean)'].std()}\n"
+                f"\tTCN:\tBest test RMSE:\t\t{rmse_tcn_max} (seed={rmse_tcn_max_seed})\n"
+                "\n"
+                f"\tTransformer:\tNumber of runs:\t\t{len(df_trans.index)}\n"
+                f"\tTransformer:\tAvg test RMSE:\t\t{df_trans['RMSE (mean)'].mean()}\n"
+                f"\tTransformer:\tAvg test RMSE STD:\t\t{df_trans['RMSE (std)'].mean()}\n"
+                f"\tTransformer:\tSTD test RMSE:\t\t{df_trans['RMSE (mean)'].std()}\n"
+                f"\tTransformer:\tBest test RMSE:\t\t{rmse_trans_max} (seed={rmse_trans_max_seed})\n"
+            )
+    except IndexError:
+        pass
+
 
 if __name__ == "__main__":
     # Logger setup.
