@@ -29,7 +29,7 @@ import re
 from datetime import datetime, timedelta
 from io import StringIO
 
-from step_detector import B1Step, get_steps_from_b1_df
+#from step_detector import B1Step, get_steps_from_b1_df
 
 logger = logging.getLogger("greenthumb")
 
@@ -364,20 +364,24 @@ def convert_df_core_to_avgs(df: pd.DataFrame) -> pd.DataFrame:
         # Average VWCs and SBDs from cores, collecting info on variance and
         # sample size as we go.
         n = len(group[1])
-        # NOTE: These "VWC (%, derived)" values are actually GWC.
-        gwc_avg = group[1]["VWC (%, derived)"].mean()
-        gwc_var = group[1]["VWC (%, derived)"].var()
+        # NOTE: These "VWC (%-derived)" values are actually GWC.
+        gwc_avg = group[1]["GWC (%-derived)"].mean()
+        gwc_var = group[1]["GWC (%-derived)"].var()
         sbd_avg = group[1]["Bulk density (g/cm^3)"].mean()
         sbd_var = group[1]["Bulk density (g/cm^3)"].var()
+        vwc_avg = group[1]["VWC"].mean()
+        vwc_var = group[1]["VWC"].var()
         new_entry = pd.DataFrame([{
             "Date": group[0][0],
             "Compaction Level (index)": group[0][1],
             "Depth (inches)": group[0][2],
             "Sample Size (# cores)": n,
-            "Core GWC (%, average)": gwc_avg,
-            "Core GWC (%, variance)": gwc_var,
+            "Core GWC (%-avg)": gwc_avg,
+            "Core GWC (%-variance)": gwc_var,
             "SBD (g/cm^3, average)": sbd_avg,
-            "SBD (g/cm^3, variance)": sbd_var
+            "SBD (g/cm^3, variance)": sbd_var,
+            "Core VWC (%-avg)": vwc_avg,
+            "Core VWC (%-variance)": vwc_var
         }])
         df_out = pd.concat(
                 [df_out, new_entry],
@@ -1299,8 +1303,40 @@ def _label_b1_wetness_get_teros12_labels(
 
     return df_b1
 
+def _label_b1_wetness_get_core_labels(
+        depth: int,
+        df_b1: pd.DataFrame,
+        df_cores: pd.DataFrame,
+        t_b1: tuple[float]
+    ) -> pd.DataFrame:
+    """
+    _label_b1_wetness_get_core_labels(...) -> df
+
+    Assume B1 timestamps are sorted properly.
+    """
+    # Make a dictionary, indexed by trial name and date.
+    df_cores_filt = df_cores.loc[df_cores["Depth (inches)"].astype(int) == 0, [
+        "Compaction Level (index)",
+        "Core VWC (%-avg)",
+        "Date"
+    ]]
+
+    # Set all B1 DF values appropriately with found dates.
+    b1_date = str(df_b1["Date"].values[0])
+    b1_cidx = str(df_b1["Compaction Level (index)"].values[0])
+    vwc_core = df_cores_filt.loc[
+            (df_cores_filt["Date"] == b1_date) &
+            (df_cores_filt["Compaction Level (index)"].astype(str) == b1_cidx),
+            "Core VWC (%-avg)"].values[0]
+
+    df_b1["Core VWC (%-avg)"] = vwc_core
+
+    return df_b1
+
+
 def _label_b1_wetness(
         df_b1: pd.DataFrame,
+        df_cores: pd.DataFrame,
         df_teros12: pd.DataFrame
     ) -> pd.DataFrame:
     """
@@ -1334,7 +1370,12 @@ def _label_b1_wetness(
                 df_teros12=df_teros12,
                 t_b1=t_b1
             )
-
+        df_b1 = _label_b1_wetness_get_core_labels(
+                depth=0,
+                df_b1=df_b1,
+                df_cores=df_cores,
+                t_b1=t_b1
+            )
     except AssertionError as e:
         print(e)
         print(f"B1 time start:\t{t_b1[0]};\n"
@@ -1367,6 +1408,7 @@ def label_dfs_b1(
         # Add labels found from the TEROS12 DF to each B1 dataset.
         df_labeled = _label_b1_wetness(
             df_b1=df,
+            df_cores=df_cores,
             df_teros12=df_teros12
         )
 
@@ -1453,14 +1495,16 @@ def preprocess_dataset(
         df_teros12=df_teros12)
 
     for df in dfs_b1_out:
+        """
         if do_steps:
             # Split into individual steps if specified.
             steps = get_steps_from_b1_df(df=df)
             [step.write(output_dir=path_output_dir) for step in steps]
         else:
-            # Write fully-processed, labeled datasets to files for further
-            # processing/learning/training.
-            _write_labeled_df(df, path_base=path_output_dir)
+            """
+        # Write fully-processed, labeled datasets to files for further
+        # processing/learning/training.
+        _write_labeled_df(df, path_base=path_output_dir)
 
 
 if __name__ == "__main__":
