@@ -128,15 +128,20 @@ def load_b1_step(df: pd.DataFrame, full_trial_label: str) -> B1Step:
     load_b1_step(df, full_trial_label) -> step
     """
     # First get step index, leg, and trial label from full file label.
-    print(full_trial_label)
-    exit()
-    """
-            idx_step: int,
-            leg: str,
-            trial_label: str,
-            ts_end: datetime,
-            ts_start: datetime,
-    """
+    labels = full_trial_label.split("-")
+    leg = labels[-2]
+    idx_step = labels[-1]
+    ts = df["Timestamp (Epoch-UTC-ms)"].values
+    trial_label = df["Dataset Label"].values[0]
+    step = B1Step(
+        df=df,
+        leg=leg,
+        idx_step=idx_step,
+        trial_label=trial_label,
+        ts_end=ts[-1],
+        ts_start=ts[0]
+    )
+    return step
 
 def _filter_step_by_max_and_leg(df: pd.DataFrame, leg: str) -> tuple[datetime]:
     """
@@ -566,8 +571,8 @@ def annotate_steps(steps: list[B1Step], output_dir):
     Todo:
         Auto-delete flagged files.
     """
-    path = "/".join([output_dir, step.filename])
     for step in steps:
+        path = "/".join([output_dir, step.filename])
         logging.info(f"Now displaying plot for {path}:")
         step.plot()
         logging.info("")
