@@ -180,7 +180,12 @@ def save_trial_splits(
     # Extract information to create a full path.
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%d_%H%M%S")
-    path = splits_dir / ("-".join([ts, str(seed), "splits", str(idx)]) + ".csv")
+    path = splits_dir / ("-".join([
+        ts,
+        str(seed),
+        "splits",
+        str(idx)
+    ]) + ".csv")
 
     # Next, add a header line.
     header = ",".join([
@@ -1028,8 +1033,8 @@ def analyze_benchmark_results(
             rmses[model].append(metrics["test_rmse"])
 
     # Now get statistics for each model.
-    print(rmses)
     for model, vals in rmses.items():
+        print(f"\tRESULTS: {model} - {vals}")
         rmse_avg = np.mean(vals)
         rmse_median = np.median(vals)
         rmse_std = np.std(vals)
@@ -1170,6 +1175,15 @@ def run_benchmark(
             f"stride: {dataset_summary['stride']}\n\n"
         )
 
+        # Save trial splits.
+        save_trial_splits(
+                assignment=split_assignments[idx],
+                idx=idx,
+                output_dir=output_dir,
+                seed=seed,
+                training_config=training_config
+            )
+
         # Run each model through a round of the benchmark.
         for name, model in models.items():
             trial_results: Dict[str, Dict[str, float]] = {}
@@ -1191,26 +1205,17 @@ def run_benchmark(
                     training_config=training_config,
                     wandb_config=wandb_config
                 )
-        # Save trial splits.
-        save_trial_splits(
-                assignment=split_assignments[idx],
-                idx=idx,
-                output_dir=output_dir,
-                seed=seed,
-                training_config=training_config
-            )
 
+            # Report benchmark results for each seed.
+            _print_benchmark_results(
+                    idx=idx+1,
+                    n=len(data_bundles),
+                    results=trial_results,
+                    seed=seed
+                )
 
-        # Report benchmark results for each seed.
-        _print_benchmark_results(
-                idx=idx+1,
-                n=len(data_bundles),
-                results=trial_results,
-                seed=seed
-            )
-
-        # Add results here for final evaluation.
-        results.append(trial_results)
+            # Add results here for final evaluation.
+            results.append(trial_results)
 
     # Analyze results here.
     analyze_benchmark_results(output_dir=output_dir, results=results, seed=seed)

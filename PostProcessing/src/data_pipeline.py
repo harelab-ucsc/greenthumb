@@ -150,9 +150,10 @@ FEATURES_JTORQUE: Sequence[str] = (
 
 # VWC features from TEROS-12 sensors.
 FEATURES_VWC: Sequence[str] = (
-        "Est VWC (%-4in)",
-        "Est VWC (%-7in)",
-        "Est VWC (%-10in)"
+        "Core VWC (%-avg)",
+        #"Est VWC (%-4in)",
+        #"Est VWC (%-7in)",
+        #"Est VWC (%-10in)"
     )
 
 # Labels.
@@ -645,7 +646,7 @@ def _assign_trial_splits(
                 meta.idx_compaction, meta.idx_wetness
             )])
         division[key] = n
-    
+
     # From total number of steps, find number of steps to provide for each
     # split.
     """
@@ -655,9 +656,9 @@ def _assign_trial_splits(
     """
     if val_frac == 0:
         assignments = []
-        assignment: Dict[Tuple[int, int, str], str] = {}
         # For LOOCV, train and evaluate on every possible scene config.
         for idx in range(n_scenes):
+            assignment: Dict[Tuple[int, int, str], str] = {}
             keys = list(by_key.keys())
             test_key = keys[idx]
             test_trials = by_key[test_key]
