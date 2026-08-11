@@ -293,7 +293,7 @@ def trim_steps(steps: list[B1Step]) -> list[B1Step]:
 
     # Now only return steps whose start time does not overlap with another step
     #   (by some threshold).
-    SEPARATION_STEP = 200   # Min time (ms) between end of one step and start of
+    SEPARATION_STEP = 100   # Min time (ms) between end of one step and start of
                             # another.
     # Add the first step.
     steps_out = [steps_sorted[0]]
@@ -354,11 +354,9 @@ def get_steps_from_b1_df(
     logging.info(f"Detected {len(steps)} steps in {trial_label}.")
 
     # NOTE: Uncomment the below if steps must be fully isolated.
-    """
     # Only include steps that are fully temporally-separated.
     steps = trim_steps(steps=steps)
     logging.info(f"Filtered to {len(steps)} separate steps in {trial_label}.")
-    """
 
     # Plot a sample of steps if desired.
     n_steps = 3
