@@ -34,6 +34,27 @@ from io import StringIO
 logger = logging.getLogger("greenthumb_plotter")
 
 
+# Global LUT for test label and experimental conditions.
+#   (COMP_IDX, VWC_IDX)
+LUT_EXPERIMENTS = {
+        "20260518_145400-inPlace": (0,0),
+        "20260518_145400-walk": (0,0),
+        "20260518_145400-inPlaceTry": (0,0), 
+        "20260518_170400-walk": (1,0),
+        "20260518_170400-inPlaceTry": (1,0), 
+        "20260518_170400-inPlace": (1,0),
+        "20260520_135800-walk1": (2,0),
+        "20260520_135800-walk0": (2,0),
+        "20260520_135800-inPlace": (2,0),
+        "20260529_160600-walk": (0,1),
+        "20260529_160600-inPlaceManual1": (0,1),
+        "20260529_160600-inPlace": (0,1),
+        "20260529_173500-inPlaceManual": (1,1),
+        "20260529_173500-walk": (1,1),
+        "20260529_173500-inPlace": (1,1)
+    }
+
+
 def _check_and_get_input_dirs(
         input_dir: str) -> tuple[str, tuple[str, str, str]]:
     """
@@ -88,7 +109,9 @@ def _load_splits_file(path: str) -> dict:
         if len(parts) != 2:
             logging.warning(f"{path} is not a valid split file; skipping...")
             return None
-        splits[parts[1]].append(parts[0])
+        condition = LUT_EXPERIMENTS[parts[0]]
+        if condition not in splits[parts[1]]:
+            splits[parts[1]].append(condition)
     
     return splits
 
@@ -202,7 +225,7 @@ def _load_history_files(base_dir: str) -> dict:
             continue
 
         # 0: Timestamp - 1: Model Name - 2: Seed - 3: Fold # - ...
-        fold = int(parts[2])
+        fold = int(parts[3])
         if fold not in histories.keys():
             histories[fold] = []
 
@@ -309,7 +332,13 @@ def plot_results(
     """
     plot_results(assigments, histories, output_dir, save)
     """
-    pass
+    for model, folds in histories.items():
+        for fold in folds.keys():
+            split = assignments[fold]
+            print()
+            print(fold)
+            print(split)
+            print()
 
 def plot_folds(
         input_dir: str,
