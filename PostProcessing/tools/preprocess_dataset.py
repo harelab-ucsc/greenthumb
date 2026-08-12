@@ -31,7 +31,7 @@ from io import StringIO
 
 #from step_detector import B1Step, get_steps_from_b1_df
 
-logger = logging.getLogger("greenthumb")
+logger = logging.getLogger(__main__)
 
 
 # Useful macros.
@@ -1508,6 +1508,10 @@ def preprocess_dataset(
 
 
 if __name__ == "__main__":
+    # Logger setup.
+    logging.basicConfig(level=logging.INFO)
+
+    # Arg parsing.
     parser = argparse.ArgumentParser(
         description="Convert raw sensor data into a form usable by GreenThumb."
     )

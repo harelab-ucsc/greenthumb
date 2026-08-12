@@ -76,25 +76,25 @@ def legacy_post_process_results(path_results: str):
     
         # Get useful info.
         try:
-            rmse_alt_lstm_max = df_alt_lstm["TestRMSE"].max()
-            rmse_alt_lstm_max_seed = df_alt_lstm.loc[
-                    df_alt_lstm["TestRMSE"] == rmse_alt_lstm_max, "Seed"].iloc[0]
-            rmse_alt_tcn_max = df_alt_tcn["TestRMSE"].max()
-            rmse_alt_tcn_max_seed = df_alt_tcn.loc[
-                    df_alt_tcn["TestRMSE"] == rmse_alt_tcn_max, "Seed"].iloc[0]
-            rmse_alt_trans_max = df_alt_trans["TestRMSE"].max()
-            rmse_alt_trans_max_seed = df_alt_trans.loc[
-                    df_alt_trans["TestRMSE"] == rmse_alt_trans_max, "Seed"].iloc[0]
+            rmse_alt_lstm_min = df_alt_lstm["TestRMSE"].min()
+            rmse_alt_lstm_min_seed = df_alt_lstm.loc[
+                    df_alt_lstm["TestRMSE"] == rmse_alt_lstm_min, "Seed"].iloc[0]
+            rmse_alt_tcn_min = df_alt_tcn["TestRMSE"].min()
+            rmse_alt_tcn_min_seed = df_alt_tcn.loc[
+                    df_alt_tcn["TestRMSE"] == rmse_alt_tcn_min, "Seed"].iloc[0]
+            rmse_alt_trans_min = df_alt_trans["TestRMSE"].min()
+            rmse_alt_trans_min_seed = df_alt_trans.loc[
+                    df_alt_trans["TestRMSE"] == rmse_alt_trans_min, "Seed"].iloc[0]
             """
-            rmse_alt_lstm_max = df_alt_lstm["TestRMSE"].max()
-            rmse_alt_lstm_max_seed = df_alt_lstm.loc[
-                    df_alt_lstm["TestRMSE"] == rmse_alt_lstm_max, "Seed"].iloc[0]
-            rmse_alt_tcn_max = df_alt_tcn["TestRMSE"].max()
-            rmse_alt_tcn_max_seed = df_alt_tcn.loc[
-                    df_alt_tcn["TestRMSE"] == rmse_alt_tcn_max, "Seed"].iloc[0]
-            rmse_alt_trans_max = df_alt_trans["TestRMSE"].max()
-            rmse_alt_trans_max_seed = df_alt_trans.loc[
-                    df_alt_trans["TestRMSE"] == rmse_alt_trans_max, "Seed"].iloc[0]
+            rmse_alt_lstm_min = df_alt_lstm["TestRMSE"].min()
+            rmse_alt_lstm_min_seed = df_alt_lstm.loc[
+                    df_alt_lstm["TestRMSE"] == rmse_alt_lstm_min, "Seed"].iloc[0]
+            rmse_alt_tcn_min = df_alt_tcn["TestRMSE"].min()
+            rmse_alt_tcn_min_seed = df_alt_tcn.loc[
+                    df_alt_tcn["TestRMSE"] == rmse_alt_tcn_min, "Seed"].iloc[0]
+            rmse_alt_trans_min = df_alt_trans["TestRMSE"].min()
+            rmse_alt_trans_min_seed = df_alt_trans.loc[
+                    df_alt_trans["TestRMSE"] == rmse_alt_trans_min, "Seed"].iloc[0]
             """
 
             perc_e_alt_lstm_min = df_alt_lstm["TestPercentErrorMean"].min()
@@ -117,15 +117,15 @@ def legacy_post_process_results(path_results: str):
             perc_e_alt_trans_min_seed = df_alt_trans.loc[
                     df_alt_trans["TestPercentErrorMean"] == perc_e_alt_trans_min, "Seed"]
             """
-            acc_alt_lstm_max = df_alt_lstm["TestAccuracy"].max()
-            acc_alt_lstm_max_seed = df_alt_lstm.loc[
-                    df_alt_lstm["TestAccuracy"] == acc_alt_lstm_max, "Seed"].iloc[0]
-            acc_alt_tcn_max = df_alt_tcn["TestAccuracy"].max()
-            acc_alt_tcn_max_seed = df_alt_tcn.loc[
-                    df_alt_tcn["TestAccuracy"] == acc_alt_tcn_max, "Seed"].iloc[0]
-            acc_alt_trans_max = df_alt_trans["TestAccuracy"].max()
-            acc_alt_trans_max_seed = df_alt_trans.loc[
-                    df_alt_trans["TestAccuracy"] == acc_alt_trans_max, "Seed"].iloc[0]
+            acc_alt_lstm_min = df_alt_lstm["TestAccuracy"].min()
+            acc_alt_lstm_min_seed = df_alt_lstm.loc[
+                    df_alt_lstm["TestAccuracy"] == acc_alt_lstm_min, "Seed"].iloc[0]
+            acc_alt_tcn_min = df_alt_tcn["TestAccuracy"].min()
+            acc_alt_tcn_min_seed = df_alt_tcn.loc[
+                    df_alt_tcn["TestAccuracy"] == acc_alt_tcn_min, "Seed"].iloc[0]
+            acc_alt_trans_min = df_alt_trans["TestAccuracy"].min()
+            acc_alt_trans_min_seed = df_alt_trans.loc[
+                    df_alt_trans["TestAccuracy"] == acc_alt_trans_min, "Seed"].iloc[0]
 
             # Print it.
             logging.info(
@@ -139,8 +139,8 @@ def legacy_post_process_results(path_results: str):
                     f"\tLSTM:\tSTD test RMSE:\t\t{df_alt_lstm['TestRMSE'].std()}\n"
                     f"\tLSTM:\tAvg test % err:\t\t{df_alt_lstm['TestPercentErrorMean'].mean()}\n"
                     f"\tLSTM:\tSTD test % err:\t\t{df_alt_lstm['TestPercentErrorMean'].std()}\n"
-                    f"\tLSTM:\tBest test acc:\t\t{acc_alt_lstm_max} (seed={acc_alt_lstm_max_seed})\n"
-                    f"\tLSTM:\tBest test RMSE:\t\t{rmse_alt_lstm_max} (seed={rmse_alt_lstm_max_seed})\n"
+                    f"\tLSTM:\tBest test acc:\t\t{acc_alt_lstm_min} (seed={acc_alt_lstm_min_seed})\n"
+                    f"\tLSTM:\tBest test RMSE:\t\t{rmse_alt_lstm_min} (seed={rmse_alt_lstm_min_seed})\n"
                     f"\tLSTM:\tBest test % err:\t{perc_e_alt_lstm_min} (seed={perc_e_alt_lstm_min_seed})\n"
                     "\n"
                     f"\tTCN:\tNumber of runs:\t\t{len(df_alt_tcn.index)}\n"
@@ -150,8 +150,8 @@ def legacy_post_process_results(path_results: str):
                     f"\tTCN:\tSTD test RMSE:\t\t{df_alt_tcn['TestRMSE'].std()}\n"
                     f"\tTCN:\tAvg test % err:\t\t{df_alt_tcn['TestPercentErrorMean'].mean()}\n"
                     f"\tTCN:\tSTD test % err:\t\t{df_alt_tcn['TestPercentErrorMean'].std()}\n"
-                    f"\tTCN:\tBest test acc:\t\t{acc_alt_tcn_max} (seed={acc_alt_tcn_max_seed})\n"
-                    f"\tTCN:\tBest test RMSE:\t\t{rmse_alt_tcn_max} (seed={rmse_alt_tcn_max_seed})\n"
+                    f"\tTCN:\tBest test acc:\t\t{acc_alt_tcn_min} (seed={acc_alt_tcn_min_seed})\n"
+                    f"\tTCN:\tBest test RMSE:\t\t{rmse_alt_tcn_min} (seed={rmse_alt_tcn_min_seed})\n"
                     f"\tTCN:\tBest test % err:\t{perc_e_alt_tcn_min} (seed={perc_e_alt_tcn_min_seed})\n"
                     "\n"
                     f"\tTransformer:\tNumber of runs:\t\t{len(df_alt_trans.index)}\n"
@@ -161,8 +161,8 @@ def legacy_post_process_results(path_results: str):
                     f"\tTransformer:\tSTD test RMSE:\t\t{df_alt_trans['TestRMSE'].std()}\n"
                     f"\tTransformer:\tAvg test % err:\t\t{df_alt_trans['TestPercentErrorMean'].mean()}\n"
                     f"\tTransformer:\tSTD test % err:\t\t{df_alt_trans['TestPercentErrorMean'].std()}\n"
-                    f"\tTransformer:\tBest test acc:\t\t{acc_alt_trans_max} (seed={acc_alt_trans_max_seed})\n"
-                    f"\tTransformer:\tBest test RMSE:\t\t{rmse_alt_trans_max} (seed={rmse_alt_trans_max_seed})\n"
+                    f"\tTransformer:\tBest test acc:\t\t{acc_alt_trans_min} (seed={acc_alt_trans_min_seed})\n"
+                    f"\tTransformer:\tBest test RMSE:\t\t{rmse_alt_trans_min} (seed={rmse_alt_trans_min_seed})\n"
                     f"\tTransformer:\tBest test % err:\t{perc_e_alt_trans_min} (seed={perc_e_alt_trans_min_seed})\n"
                 )
         except IndexError:
@@ -187,15 +187,15 @@ def post_process_results(path_results: str):
     
     # Get useful info.
     try:
-        rmse_lstm_max = df_lstm["RMSE (mean)"].max()
-        rmse_lstm_max_seed = df_lstm.loc[
-                df_lstm["RMSE (mean)"] == rmse_lstm_max, "Seed"].iloc[0]
-        rmse_tcn_max = df_tcn["RMSE (mean)"].max()
-        rmse_tcn_max_seed = df_tcn.loc[
-                df_tcn["RMSE (mean)"] == rmse_tcn_max, "Seed"].iloc[0]
-        rmse_trans_max = df_trans["RMSE (mean)"].max()
-        rmse_trans_max_seed = df_trans.loc[
-                df_trans["RMSE (mean)"] == rmse_trans_max, "Seed"].iloc[0]
+        rmse_lstm_min = df_lstm["RMSE (mean)"].min()
+        rmse_lstm_min_seed = df_lstm.loc[
+                df_lstm["RMSE (mean)"] == rmse_lstm_min, "Seed"].iloc[0]
+        rmse_tcn_min = df_tcn["RMSE (mean)"].min()
+        rmse_tcn_min_seed = df_tcn.loc[
+                df_tcn["RMSE (mean)"] == rmse_tcn_min, "Seed"].iloc[0]
+        rmse_trans_min = df_trans["RMSE (mean)"].min()
+        rmse_trans_min_seed = df_trans.loc[
+                df_trans["RMSE (mean)"] == rmse_trans_min, "Seed"].iloc[0]
         # Print it.
         logging.info(
                 f"RESULTS FROM {path_results} (TARGET=SBD):\n"
@@ -205,19 +205,19 @@ def post_process_results(path_results: str):
                 f"\tLSTM:\tAvg test RMSE:\t\t{df_lstm['RMSE (mean)'].mean()}\n"
                 f"\tLSTM:\tAvg test RMSE STD:\t\t{df_lstm['RMSE (std)'].mean()}\n"
                 f"\tLSTM:\tSTD test RMSE:\t\t{df_lstm['RMSE (mean)'].std()}\n"
-                f"\tLSTM:\tBest test RMSE:\t\t{rmse_lstm_max} (seed={rmse_lstm_max_seed})\n"
+                f"\tLSTM:\tBest test RMSE:\t\t{rmse_lstm_min} (seed={rmse_lstm_min_seed})\n"
                 "\n"
                 f"\tTCN:\tNumber of runs:\t\t{len(df_tcn.index)}\n"
                 f"\tTCN:\tAvg test RMSE:\t\t{df_tcn['RMSE (mean)'].mean()}\n"
                 f"\tTCN:\tAvg test RMSE STD:\t\t{df_tcn['RMSE (std)'].mean()}\n"
                 f"\tTCN:\tSTD test RMSE:\t\t{df_tcn['RMSE (mean)'].std()}\n"
-                f"\tTCN:\tBest test RMSE:\t\t{rmse_tcn_max} (seed={rmse_tcn_max_seed})\n"
+                f"\tTCN:\tBest test RMSE:\t\t{rmse_tcn_min} (seed={rmse_tcn_min_seed})\n"
                 "\n"
                 f"\tTransformer:\tNumber of runs:\t\t{len(df_trans.index)}\n"
                 f"\tTransformer:\tAvg test RMSE:\t\t{df_trans['RMSE (mean)'].mean()}\n"
                 f"\tTransformer:\tAvg test RMSE STD:\t\t{df_trans['RMSE (std)'].mean()}\n"
                 f"\tTransformer:\tSTD test RMSE:\t\t{df_trans['RMSE (mean)'].std()}\n"
-                f"\tTransformer:\tBest test RMSE:\t\t{rmse_trans_max} (seed={rmse_trans_max_seed})\n"
+                f"\tTransformer:\tBest test RMSE:\t\t{rmse_trans_min} (seed={rmse_trans_min_seed})\n"
             )
     except IndexError:
         pass
