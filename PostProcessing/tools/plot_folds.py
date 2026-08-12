@@ -308,37 +308,99 @@ def _load_model_histories(models_dirs: tuple[str, str, str]) -> dict:
 
     return histories
 
-def load_model_results(input_dir: str) -> dict:
+def _load_results(input_dir: str) -> dict:
+    """
+    _load_results(input_dir) -> results
+
+    Returns:
+        {
+            "lstm": {
+                <FOLD_#>: {
+                    "test_rmse": []
+                },
+                ...
+            },
+            "tcn": {...},
+            "transformer": {...}
+        }
+    """
+    results = {}
+
+    # Check that "model_results.csv" file exists and is properly formatted.
+    path = os.path.join(input_dir, "model_results.csv")
+    if not os.path.isfile(path):
+        logging.error(f"Model results not found at {path}; aborting.")
+        exit(1)
+
+    required_keys = [
+            "test_rmse"
+        ]
+    """
+    if not all(key in data.keys() for key in required_keys):
+        logging.error(f"Model results file {path} incomplete; aborting.")
+        exit(1)
+    """
+
+    # Load all model results.
+    df = pd.read_csv(path)
+    models = df["ModelName"].unique().tolist()
+    folds = df["TrainingIndex"].astype(int).unique().tolist()
+    for model in models:
+        results[model] = {}
+        for fold in folds:
+            results[model][fold] = df.loc[
+                    (df["ModelName"] == model) &
+                    (df["TrainingIndex"].astype(int) == fold),
+                    "TestRMSE"].astype(float).values
+
+    return results
+
+def load_model_results(input_dir: str) -> tuple[dict, dict, dict]:
     """
     load_model_results(input_dir) -> results:
     """
     # Check that directory has proper stucture.
-    splits_dir, models_dirs = _check_and_get_input_dirs(input_dir)
+    splits_dir, models_dirs = _check_and_get_input_dirs(input_dir=input_dir)
 
     # Locate and load all assignment breakdowns.
     assignments = _load_assignments(splits_dir=splits_dir)
 
     # Locate and load all saved model histories.
-    histories = _load_model_histories(models_dirs=models_dirs)
+    # NOTE: This is only useful when plotting training/loss histories.
+    #histories = _load_model_histories(models_dirs=models_dirs)
+    histories = None
 
-    return assignments, histories
+    # Locate and load saved model results.
+    results = _load_results(input_dir=input_dir)
+
+    return assignments, histories, results
 
 def plot_results(
         assignments: dict,
         histories: dict,
         output_dir: str,
+        results: dict,
         save: bool
     ):
     """
     plot_results(assigments, histories, output_dir, save)
     """
-    for model, folds in histories.items():
+    for model, folds in results.items():
+        plt.figure(figsize=(6,4))
+        plt.boxplot(
+                [folds[key] for key in folds.keys()],
+                [assignments[fold]["test"] for fold in folds.keys()],
+                patch_artist=True,
+                boxprops=dict(facecolor="lightblue", color="blue"),
+                medianprops=dict(color="red", linewidth=2)
+            )
+        plt.title(f"Test (model={model})")
+        plt.ylabel("RMSE")
+        plt.show()
         for fold in folds.keys():
             split = assignments[fold]
-            print()
-            print(fold)
-            print(split)
-            print()
+            test_mean_fold = np.mean(folds[fold])
+            test_std_fold = np.std(folds[fold])
 
 def plot_folds(
         input_dir: str,
@@ -356,13 +418,14 @@ def plot_folds(
         save = False
 
     # Find, load, and group all model run histories.
-    assignments, histories = load_model_results(input_dir=input_dir)
+    assignments, histories, results = load_model_results(input_dir=input_dir)
 
     # Generate plots.
     plot_results(
             assignments=assignments,
             histories=histories,
             output_dir=output_dir,
+            results=results,
             save=save
         )
 
