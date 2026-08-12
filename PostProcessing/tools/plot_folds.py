@@ -17,6 +17,7 @@ Version:
 """
 import argparse
 import csv
+import json
 import logging
 import math
 import matplotlib.pyplot as plt
@@ -51,7 +52,7 @@ def _check_and_get_input_dirs(
             logging.error(f"{d} does not exist; aborting")
             exit(1)
 
-    logging.info("\tDONE.")
+    logging.info("\tDONE.\n")
     return (splits_dir, (lstm_dir, tcn_dir, trans_dir))
 
 def _load_splits_file(path: str) -> dict:
@@ -136,8 +137,79 @@ def _load_assignments(splits_dir: str) -> dict:
             # Add splits to fold.
             assignments[fold] = splits
 
-    logging.info("\tDONE.")
+    logging.info("\tDONE.\n")
     return assignments
+
+def _load_history_files(base_dir: str) -> dict:
+    """
+    _load_history_files(base_dir) -> model_histories
+
+    Returns:
+        {
+            <FOLD_#>: [
+                {
+                    "epoch_indices": [...],
+                    "train_epoch_loss": [...],
+                    "learning_rates": [...],
+                    "train_batch_loss": [...],
+                    "train_batch_step": [...],
+                    "best_epoch": [...],
+                    "test_loss": float
+                },
+                ...
+            ],
+            ...
+        }
+    """
+    histories = {}
+
+    # Get all history files.
+    fns_histories = [
+            f for f in os.listdir(base_dir) if (
+                os.path.isfile(os.path.join(base_dir, f))
+            ) and (
+                f.endswith(".json")
+            )
+        ]
+
+    for fn in fns_histories:
+        path = os.path.join(base_dir, fn)
+
+        # Digest each file into its fold and splits.
+        parts = fn.split("-")
+        # Enforce file structure.
+        if len(parts) != 12:
+            logging.warning(f"History file {path} invalid; skipping...")
+            continue
+
+        # Load file.
+        data = {}
+        with open(path, "r+") as hfp:
+            data = json.load(hfp)
+
+        # Check that all required keys are found.
+        required_keys = [
+                "epoch_indices",
+                "train_epoch_loss",
+                "learning_rates",
+                "train_batch_loss",
+                "train_batch_step",
+                "best_epoch",
+                "test_loss"
+            ]
+        if not all(key in data.keys() for key in required_keys):
+            logging.warning(f"History file {path} incomplete; skipping...")
+            continue
+
+        # 0: Timestamp - 1: Model Name - 2: Seed - 3: Fold # - ...
+        fold = int(parts[2])
+        if fold not in histories.keys():
+            histories[fold] = []
+
+        # Add to history.
+        histories[fold].append({key: data[key] for key in required_keys})
+
+    return histories
 
 def _load_lstm_histories(lstm_dir: str) -> dict:
     """
@@ -151,7 +223,10 @@ def _load_lstm_histories(lstm_dir: str) -> dict:
         }
     """
     logging.info(f"Loading LSTM histories for each fold from {lstm_dir}...")
-    logging.info("\tDONE.")
+    histories = _load_history_files(base_dir=lstm_dir)
+    logging.info("\tDONE.\n")
+
+    return histories
 
 def _load_tcn_histories(tcn_dir: str) -> dict:
     """
@@ -165,7 +240,10 @@ def _load_tcn_histories(tcn_dir: str) -> dict:
         }
     """
     logging.info(f"Loading TCN histories for each fold from {tcn_dir}...")
-    logging.info("\tDONE.")
+    histories = _load_history_files(base_dir=tcn_dir)
+    logging.info("\tDONE.\n")
+
+    return histories
 
 def _load_trans_histories(trans_dir: str) -> dict:
     """
@@ -180,7 +258,10 @@ def _load_trans_histories(trans_dir: str) -> dict:
     """
     logging.info(
             f"Loading Transformer histories for each fold from {trans_dir}...")
-    logging.info("\tDONE.")
+    histories = _load_history_files(base_dir=trans_dir)
+    logging.info("\tDONE.\n")
+
+    return histories
 
 def _load_model_histories(models_dirs: tuple[str, str, str]) -> dict:
     """
@@ -217,12 +298,16 @@ def load_model_results(input_dir: str) -> dict:
     # Locate and load all saved model histories.
     histories = _load_model_histories(models_dirs=models_dirs)
 
-    # Group all model histories by fold number and model name.
-    pass
+    return assignments, histories
 
-def plot_results(output_dir: str, results: dict, save: bool):
+def plot_results(
+        assignments: dict,
+        histories: dict,
+        output_dir: str,
+        save: bool
+    ):
     """
-    plot_results(output_dir, results, save)
+    plot_results(assigments, histories, output_dir, save)
     """
     pass
 
@@ -242,12 +327,13 @@ def plot_folds(
         save = False
 
     # Find, load, and group all model run histories.
-    results = load_model_results(input_dir=input_dir)
+    assignments, histories = load_model_results(input_dir=input_dir)
 
     # Generate plots.
     plot_results(
+            assignments=assignments,
+            histories=histories,
             output_dir=output_dir,
-            results=results,
             save=save
         )
 
