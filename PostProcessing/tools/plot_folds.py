@@ -10,10 +10,10 @@ Author:
     nubby
 
 Date:
-    11 Aug 2026
+    02 Sep 2026
 
 Version:
-    0.0.1
+    0.1.1
 """
 import argparse
 import csv
@@ -375,16 +375,18 @@ def load_model_results(input_dir: str) -> tuple[dict, dict, dict]:
 
     return assignments, histories, results
 
-def plot_results(
+def plot_results_models_comp(
         assignments: dict,
-        histories: dict,
         output_dir: str,
         results: dict,
         save: bool
     ):
     """
-    plot_results(assigments, histories, output_dir, save)
+    plot_results_models_comp(...)
+
+    Plot each model's performance for each fold, side-by-side.
     """
+    # Plot non-ablated model performance, side-by-side for each fold.
     for model, folds in results.items():
         plt.figure(figsize=(6,4))
         plt.boxplot(
@@ -394,20 +396,194 @@ def plot_results(
                 boxprops=dict(facecolor="lightblue", color="blue"),
                 medianprops=dict(color="red", linewidth=2)
             )
-        plt.title(f"Test (model={model})")
-        plt.ylabel("RMSE")
+        plt.title(f"Test (model={model})", fontsize=18)
+        plt.ylabel("RMSE", fontsize=14)
+
+    if not save:
         plt.show()
-        for fold in folds.keys():
-            split = assignments[fold]
-            test_mean_fold = np.mean(folds[fold])
-            test_std_fold = np.std(folds[fold])
+    else:
+        if not os.path.isdir(output_dir):
+            os.mkdir(output_dir)
+        plt.savefig(os.path.join(output_dir, "ensemble.pdf"))
+
+def plot_results_ens_boxes(
+        assignments: list,
+        folds: list,
+        mean: float,
+        models: list,
+        output_dir: str,
+        results_vwc: dict,
+        results_no_vwc: dict,
+        save: bool,
+        title: str
+    ):
+    """
+    plot_results_ens_boxes()
+
+    ...
+    """
+    # Plot average model performance for each fold, side-by-side.
+    ens_vwc = {}
+    ens_no_vwc = {}
+
+    # X locations for scenario groups + within-group offsets.
+    x = np.arange(len(folds))
+    offset = 0.20
+    box_width = 0.32
+    ylim = 0.14
+    rmse_goal = 0.074
+
+    # Generate ensemble data for each fold.
+    for fold in folds: 
+        ens_vwc[fold] = np.concatenate([
+            results_vwc[model][fold] for model in models
+            ])
+        ens_no_vwc[fold] = np.concatenate([
+            results_no_vwc[model][fold] for model in models
+            ])
+
+    # Group data from each scenario.
+    fig, ax = plt.subplots()
+    bp_vwc = ax.boxplot(
+            [ens_vwc[fold] for fold in folds],
+            boxprops=dict(facecolor="blue", color="black"),
+            medianprops=dict(color="black", linewidth=2),
+            patch_artist=True,
+            positions = x - offset,
+            widths=box_width
+        )
+    bp_no_vwc = ax.boxplot(
+            [ens_no_vwc[fold] for fold in folds],
+            boxprops=dict(facecolor="gold", color="black"),
+            medianprops=dict(color="black", linewidth=2),
+            patch_artist=True,
+            positions = x + offset,
+            widths=box_width
+        )
+    ax.set_xlabel("Scenario Label", fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(assignments)
+    ax.set_ylabel("RMSE", fontsize=14)
+    ax.set_ylim(top=ylim)
+    ax.set_title(title, fontsize=16)
+    plt.axhline(
+            y=rmse_goal,
+            color="red",
+            label="Target",
+            linestyle="--"
+        )
+    plt.text(
+            x=0.01,
+            y=rmse_goal+0.001,
+            s="0.074",
+            color="red",
+            fontsize=12
+        )
+    plt.tight_layout()
+
+    ax.legend(
+            [bp_vwc["boxes"][0], bp_no_vwc["boxes"][0]],
+            ["Standard", "VWC Ablated"],
+            loc="upper left",
+            frameon=True
+        )
+    if not save:
+        plt.show()
+    else:
+        if not os.path.isdir(output_dir):
+            os.mkdir(output_dir)
+        plt.savefig(os.path.join(output_dir, "ensemble.pdf"))
+
+def plot_results_ensemble(
+        assignments: dict,
+        output_dir: str,
+        results_no_vwc: dict,
+        results_vwc: dict,
+        save: bool,
+    ):
+    """
+    plot_results_ensemble(...)
+
+    Generate plots for model ensembles in wet and dry conditions.
+    """
+    title_wet = f"Ensemble Performance (Wet) - VWC Ablation Comparison"
+    title_dry = f"Ensemble Performance (Dry) - VWC Ablation Comparison"
+
+    # NOTE: Models and folds are the same between non-/ablated tests.
+    models = list(results_vwc.keys())
+    folds = list(results_vwc[models[0]].keys())
+    folds_wet = [fold for fold in folds if assignments[fold]["test"][0][1] > 0]
+    folds_dry = [fold for fold in folds if assignments[fold]["test"][0][1] == 0]
+    assignments_wet = [assignments[fold]["test"][0] for fold in folds_wet]
+    assignments_dry = [assignments[fold]["test"][0] for fold in folds_dry]
+
+    # Get the mean of all data from all folds.
+    rmse_avg = np.mean(np.concatenate([
+        results_vwc[model][fold] for model in models for fold in folds
+        ]))
+    
+    # Plot ablation study in dry settings.
+    plot_results_ens_boxes(
+            assignments=assignments_dry,
+            folds=folds_dry,
+            mean=rmse_avg,
+            models=models,
+            output_dir=output_dir,
+            results_vwc=results_vwc,
+            results_no_vwc=results_no_vwc,
+            save=save,
+            title=title_dry
+        )
+
+    # Plot ablation study in wet settings.
+    plot_results_ens_boxes(
+            assignments=assignments_wet,
+            folds=folds_wet,
+            mean=rmse_avg,
+            models=models,
+            output_dir=output_dir,
+            results_vwc=results_vwc,
+            results_no_vwc=results_no_vwc,
+            save=save,
+            title=title_wet
+        )
+
+def plot_results(
+        assignments: dict,
+        histories: dict,
+        output_dir: str,
+        results_vwc: dict,
+        results_no_vwc: dict,
+        save: bool,
+        ensemble: bool = False
+    ):
+    """
+    plot_results(assigments, histories, output_dir, save)
+    """
+    # TODO: Plot non-/ablated results side-by-side for each fold.
+    plot_results_models_comp(
+            assignments=assignments,
+            output_dir=output_dir,
+            results=results_vwc,
+            save=save
+        )
+
+    # Generate plots for ensemble model comparisons in wet and dry conditions.
+    plot_results_ensemble(
+            assignments=assignments,
+            output_dir=output_dir,
+            results_no_vwc=results_no_vwc,
+            results_vwc=results_vwc,
+            save=save
+        )
 
 def plot_folds(
-        input_dir: str,
+        input_dir_vwc: str,
+        input_dir_no_vwc: str,
         output_dir: str = ""
     ):
     """
-    plot_folds(input_dir, output_dir)
+    plot_folds(input_dir_vwc, input_dir_no_vwc, output_dir)
 
     Generate variance plots based on "history.json" files contained within
     input_dir, then save those plots to output_dir (if specified).
@@ -418,15 +594,20 @@ def plot_folds(
         save = False
 
     # Find, load, and group all model run histories.
-    assignments, histories, results = load_model_results(input_dir=input_dir)
+    assignments, histories, results_vwc = load_model_results(
+            input_dir=input_dir_vwc
+        )
+    _, _, results_no_vwc = load_model_results(input_dir=input_dir_no_vwc)
 
     # Generate plots.
     plot_results(
             assignments=assignments,
+            ensemble=True,
             histories=histories,
             output_dir=output_dir,
-            results=results,
-            save=save
+            results_vwc=results_vwc,
+            results_no_vwc=results_no_vwc,
+            save=save,
         )
 
 if __name__ == "__main__":
@@ -438,10 +619,16 @@ if __name__ == "__main__":
         description=("Generate variance plots.")
     )
     parser.add_argument(
-            "--input-dir",
+            "--input-dir-vwc",
             type=str,
-            default="artifacts/",
-            help="Path to input directory containing all GreenThumb outputs."
+            default="artifacts-wet/",
+            help="Path to input directory containing GreenThumb outputs with vwc."
+        )
+    parser.add_argument(
+            "--input-dir-no-vwc",
+            type=str,
+            default="artifacts-no_wet/",
+            help="Path to input directory containing GreenThumb outputs without vwc."
         )
     parser.add_argument(
             "--output-dir",
@@ -452,6 +639,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     plot_folds(
-            input_dir=args.input_dir,
+            input_dir_vwc=args.input_dir_vwc,
+            input_dir_no_vwc=args.input_dir_no_vwc,
             output_dir=args.output_dir
         )
